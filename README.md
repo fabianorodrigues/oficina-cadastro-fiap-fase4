@@ -71,16 +71,6 @@ GitHub
 -> confirmation DEPLOY
 ```
 
-Rollback por imagem:
-
-```text
-GitHub
--> Actions
--> Cadastro Rollback
--> image_tag
--> confirmation ROLLBACK
-```
-
 Dependencias externas para execucao real:
 
 - Backend Terraform
@@ -94,7 +84,20 @@ Dependencias externas para execucao real:
 - ASCP
 - Pod Identity ou IRSA
 
-Sem AWS Academy, build e validacoes locais podem ser concluidos. Push, migration, rollout, smoke test no cluster e rollback real ficam pendentes para quando o ambiente AWS estiver disponivel. Esse estado e aceitavel como `APROVADA PARA PR COM VALIDACOES AWS PENDENTES`.
+Sem AWS Academy, build e validacoes locais podem ser concluidos. Push, migration, rollout e smoke test no cluster ficam pendentes para quando o ambiente AWS estiver disponivel. Esse estado e aceitavel como `APROVADA PARA PR COM EXECUCOES AWS PENDENTES`.
+
+## CI/CD
+
+- CI principal: `Cadastro CI`, executada em todo Pull Request para `main`.
+- Required check esperado na branch protection: `Cadastro CI`.
+- Workflow manual: `Cadastro Deploy`, executado somente por `workflow_dispatch` na `main`, com confirmation `DEPLOY`.
+- Repository Secrets usados pelo deploy: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`.
+- Repository Variables usadas pelo deploy: `AWS_REGION`.
+- A CI nao recebe credenciais AWS, nao publica imagens e nao altera AWS ou Kubernetes.
+- O deploy valida branch, confirmacao, configuracao oficial, STS, SSM, Secrets Manager por metadata, ECR, cluster, migration, rollout, health e readiness.
+- Tags de imagem: `${GITHUB_SHA}` para runtime e `${GITHUB_SHA}-migration` para migration.
+- Nao existe pipeline dedicada de rollback ou destroy. Para corrigir uma entrega, reverta ou ajuste o codigo em nova branch, abra Pull Request, aguarde `Cadastro CI`, faca merge na `main` e execute novamente `Cadastro Deploy`.
+- Branch protection recomendada: Pull Request obrigatorio, required check `Cadastro CI`, bloqueio de force push e bloqueio de delecao da branch. Segundo revisor nao e obrigatorio para execucao individual ou dupla.
 
 ## Build e testes locais
 

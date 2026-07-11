@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Validate branch and confirmation
         run: |
@@ -24,10 +25,10 @@ jobs:
           test "${{ github.event.inputs.confirmation }}" = "DEPLOY"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
@@ -39,7 +40,7 @@ jobs:
         run: test -n "${{ vars.AWS_REGION }}"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -67,7 +68,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v3
 
       - name: Restore
         run: dotnet restore Oficina.Cadastro.sln
@@ -84,14 +85,14 @@ jobs:
           docker build -f Dockerfile.migration -t "${{ steps.platform.outputs.migration_image }}" .
 
       - name: Scan images
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.platform.outputs.runtime_image }}
           severity: HIGH,CRITICAL
           exit-code: '1'
 
       - name: Scan migration image
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.platform.outputs.migration_image }}
           severity: HIGH,CRITICAL

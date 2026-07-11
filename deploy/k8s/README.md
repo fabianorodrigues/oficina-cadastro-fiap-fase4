@@ -68,14 +68,14 @@ Deploy:
 GitHub -> Actions -> Cadastro Deploy -> Run workflow -> Branch main -> confirmation DEPLOY
 ```
 
-Rollback:
+Correcao de entrega:
 
 ```text
-GitHub -> Actions -> Cadastro Rollback -> image_tag -> confirmation ROLLBACK
+Nova branch -> Pull Request -> merge na main -> executar novamente Cadastro Deploy
 ```
 
-O rollback troca somente a imagem do Deployment. Downgrade de banco nao e automatizado.
+Nao existe pipeline dedicada para desfazer publicacao. As imagens continuam versionadas pelo SHA do Git.
 
 ## Sem AWS Academy
 
-Build e validacoes estaticas podem ser concluidos localmente. STS, SSM real, ECR real, Secrets Manager metadata real, Pod Identity/IRSA real, CSI/ASCP real, push, Migration Job, rollout, smoke test e rollback real ficam pendentes ate o ambiente AWS estar disponivel.
+Build e validacoes estaticas podem ser concluidos localmente. STS, SSM real, ECR real, Secrets Manager metadata real, Pod Identity/IRSA real, CSI/ASCP real, push, Migration Job, rollout e smoke test ficam pendentes ate o ambiente AWS estar disponivel.
