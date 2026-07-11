@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using Oficina.Cadastro.Api.Configuration;
 using Oficina.Cadastro.Api.Middleware;
 using Oficina.Cadastro.Api.Observability;
 using Oficina.Cadastro.Api.Security;
@@ -12,10 +13,18 @@ using Oficina.Cadastro.Infrastructure.Persistencia;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables();
+builder.Configuration.AddCadastroKeyPerFile(builder.Environment);
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options =>
 {
     options.JsonWriterOptions = new JsonWriterOptions { Indented = false };
+});
+
+builder.Configuration.ValidateCadastroProductionConfiguration(builder.Environment);
+
+builder.Host.ConfigureHostOptions(options =>
+{
+    options.ShutdownTimeout = TimeSpan.FromSeconds(30);
 });
 
 builder.Services.AddControllers();
@@ -32,7 +41,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddDevelopmentAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<IPasswordHashService, PasswordHashService>();
 builder.Services.AddCadastroApplication();
-builder.Services.AddCadastroInfrastructure(builder.Configuration);
+builder.Services.AddCadastroInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
@@ -67,7 +76,15 @@ app.UseAuthorization();
 
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy", service = "oficina-cadastro" }))
     .AllowAnonymous();
-app.MapGet("/ready", () => Results.Ok(new { status = "Ready", service = "oficina-cadastro" }))
+app.MapGet("/ready", async (CadastroDbContext db, CancellationToken ct) =>
+    {
+        if (!await db.Database.CanConnectAsync(ct))
+        {
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        return Results.Ok(new { status = "Ready", service = "oficina-cadastro" });
+    })
     .AllowAnonymous();
 
 app.MapControllers();

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-cadastro-config
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-cadastro
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_URLS: "http://+:8080"
+  Authentication__Mode: "Jwt"
+  Database__ApplyMigrations: "false"
+  OpenTelemetry__Enabled: "true"
+  OpenTelemetry__OtlpEndpoint: "http://otel-collector:4317"
+  OTEL_SERVICE_NAME: "oficina-cadastro"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"

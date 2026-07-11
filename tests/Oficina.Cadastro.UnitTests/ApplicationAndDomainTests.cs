@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Oficina.Cadastro.Api.Configuration;
 using Oficina.Cadastro.Api.Controllers;
 using Oficina.Cadastro.Api.Security;
 using Oficina.Cadastro.Application.Abstractions.Repositorios;
@@ -26,6 +27,7 @@ using Oficina.Cadastro.Domain.Seguranca;
 using Oficina.Cadastro.Domain.Seguranca.Enums;
 using Oficina.Cadastro.Domain.Veiculos;
 using Oficina.Cadastro.Domain.Veiculos.ValueObjects;
+using Oficina.Cadastro.Infrastructure;
 
 namespace Oficina.Cadastro.UnitTests;
 
@@ -172,6 +174,59 @@ public class ApplicationAndDomainTests
             new ServiceCollection().AddDevelopmentAuthentication(config, new FakeEnvironment("Production")));
 
         Assert.Contains("Development", ex.Message);
+    }
+
+    [Fact]
+    public void Development_deve_permitir_configuracao_local_sem_connection_string_explicita()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+
+        services.AddCadastroInfrastructure(config, allowLocalFallback: true);
+
+        Assert.Contains(services, service => service.ServiceType.Name.Contains("DbContextOptions"));
+    }
+
+    [Fact]
+    public void Production_deve_rejeitar_authentication_mode_development()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Authentication:Mode"] = "Development",
+                ["ConnectionStrings:OficinaCadastroDb"] = "Server=.;Database=OficinaCadastroDb;Trusted_Connection=True"
+            })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            config.ValidateCadastroProductionConfiguration(new FakeEnvironment("Production")));
+
+        Assert.Equal("Modo de autenticacao Development nao pode ser utilizado em Production.", ex.Message);
+    }
+
+    [Fact]
+    public void Production_deve_rejeitar_connection_string_ausente_com_mensagem_clara()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Authentication:Mode"] = "Jwt" })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            config.ValidateCadastroProductionConfiguration(new FakeEnvironment("Production")));
+
+        Assert.Equal("Connection string obrigatoria nao foi configurada.", ex.Message);
+    }
+
+    [Fact]
+    public void Production_nao_deve_usar_fallback_local_de_banco()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            services.AddCadastroInfrastructure(config, allowLocalFallback: false));
+
+        Assert.Equal("Connection string obrigatoria nao foi configurada.", ex.Message);
     }
 
     private static void AssertAuthorizePolicy<T>(string policy)

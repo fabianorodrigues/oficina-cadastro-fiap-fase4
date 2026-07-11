@@ -1,0 +1,82 @@
+name: Cadastro Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Runtime image SHA tag'
+        required: true
+      confirmation:
+        description: 'Type ROLLBACK to rollback Cadastro image'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cadastro-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate branch, tag and confirmation
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${{ github.event.inputs.confirmation }}" = "ROLLBACK"
+          echo "${{ github.event.inputs.image_tag }}" | grep -Eq '^[0-9a-f]{7,40}$'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve platform metadata
+        id: platform
+        run: |
+          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --query 'Parameter.Value' --output text)"
+          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --query 'Parameter.Value' --output text)"
+          repo_name="${ecr##*/}"
+          aws ecr describe-images --repository-name "${repo_name}" --image-ids imageTag="${{ github.event.inputs.image_tag }}" >/dev/null
+          {
+            echo "cluster=${cluster}"
+            echo "ecr=${ecr}"
+            echo "image=${ecr}:${{ github.event.inputs.image_tag }}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Configure kubeconfig
+        run: aws eks update-kubeconfig --name "${{ steps.platform.outputs.cluster }}" --region "${{ vars.AWS_REGION }}"
+
+      - name: Set runtime image
+        run: |
+          kubectl set image deployment/oficina-cadastro api="${{ steps.platform.outputs.image }}" -n oficina
+          kubectl rollout status deployment/oficina-cadastro -n oficina --timeout=600s
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl port-forward -n oficina service/oficina-cadastro 18080:8080 >/tmp/cadastro-port-forward.log 2>&1 &
+          pf_pid=$!
+          trap 'kill $pf_pid || true' EXIT
+          sleep 5
+          pwsh ./scripts/smoke-test.ps1 -BaseUrl http://127.0.0.1:18080 -ExpectedEnvironment Production
+
+      - name: Summary
+        run: |
+          {
+            echo "Commit SHA: ${GITHUB_SHA}"
+            echo "ECR repository: ${{ steps.platform.outputs.ecr }}"
+            echo "Runtime image tag: ${{ github.event.inputs.image_tag }}"
+            echo "Cluster: ${{ steps.platform.outputs.cluster }}"
+            echo "Namespace: oficina"
+            echo "Deployment status: rollback rollout complete"
+            echo "Smoke test status: passed"
+          } >> "${GITHUB_STEP_SUMMARY}"

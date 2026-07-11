@@ -9,11 +9,23 @@ namespace Oficina.Cadastro.Infrastructure;
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddCadastroInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddCadastroInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        bool allowLocalFallback)
     {
         var connectionString = configuration.GetConnectionString("OficinaCadastroDb")
-            ?? configuration.GetConnectionString("SqlServer")
-            ?? "Server=(localdb)\\MSSQLLocalDB;Database=OficinaCadastroDb;Trusted_Connection=True;TrustServerCertificate=True";
+            ?? configuration.GetConnectionString("SqlServer");
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            if (!allowLocalFallback)
+            {
+                throw new InvalidOperationException("Connection string obrigatoria nao foi configurada.");
+            }
+
+            connectionString = "Server=(localdb)\\MSSQLLocalDB;Database=OficinaCadastroDb;Trusted_Connection=True;TrustServerCertificate=True";
+        }
 
         services.AddDbContext<CadastroDbContext>(options =>
             options.UseSqlServer(connectionString, sql => sql.EnableRetryOnFailure()));
