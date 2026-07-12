@@ -1,6 +1,8 @@
 # oficina-cadastro-fiap-fase4
 
-Microsservico responsavel pelo cadastro de clientes, veiculos, funcionarios e pelo catalogo de servicos da Oficina.
+## Responsabilidade
+
+Microsservico responsavel pelo cadastro de clientes, veiculos, funcionarios e pelo catalogo de servicos da Oficina. Independente dos demais microsservicos: CI, deploy e banco lógico (`OficinaCadastroDb`) próprios. Ponto de entrada da solução: [oficina-infra-fiap-fase4](../oficina-infra-fiap-fase4/README.md).
 
 ## Arquitetura
 
@@ -84,7 +86,7 @@ Dependencias externas para execucao real:
 - ASCP
 - Pod Identity ou IRSA
 
-Sem AWS Academy, build e validacoes locais podem ser concluidos. Push, migration, rollout e smoke test no cluster ficam pendentes para quando o ambiente AWS estiver disponivel. Esse estado e aceitavel como `APROVADA PARA PR COM EXECUCOES AWS PENDENTES`.
+Sem acesso a AWS, build e validacoes locais podem ser concluidos. Push, migration, rollout e smoke test no cluster dependem de credenciais AWS configuradas e das dependencias acima provisionadas.
 
 ## CI/CD
 
@@ -118,3 +120,7 @@ docker build -f Dockerfile.migration -t oficina-cadastro:local-migration .
 Este servico e consumido pelo `oficina-ordens-servico-fiap-fase4` via HTTP interno e faz parte do ambiente Docker Compose local descrito naquele repositorio.
 
 O Dockerfile oficial da raiz gera uma imagem runtime sem SDK e sem `dotnet-ef`. O `Dockerfile.migration` gera um EF Migration Bundle em `/app/efbundle`; ele nao executa migrations durante o build e recebe a connection string somente em runtime.
+
+## Próximo componente
+
+Cadastro é implantado de forma independente após as dependências compartilhadas (Infra DB, Platform, Auth). Após o deploy, o [oficina-ordens-servico-fiap-fase4](../oficina-ordens-servico-fiap-fase4/README.md) o consome via HTTP interno.

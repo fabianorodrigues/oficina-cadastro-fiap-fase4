@@ -76,6 +76,6 @@ Nova branch -> Pull Request -> merge na main -> executar novamente Cadastro Depl
 
 Nao existe pipeline dedicada para desfazer publicacao. As imagens continuam versionadas pelo SHA do Git.
 
-## Sem AWS Academy
+## Validação sem acesso à AWS
 
-Build e validacoes estaticas podem ser concluidos localmente. STS, SSM real, ECR real, Secrets Manager metadata real, Pod Identity/IRSA real, CSI/ASCP real, push, Migration Job, rollout e smoke test ficam pendentes ate o ambiente AWS estar disponivel.
+Build e validacoes estaticas podem ser concluidos localmente. STS, SSM real, ECR real, Secrets Manager metadata real, Pod Identity/IRSA real, CSI/ASCP real, push, Migration Job, rollout e smoke test dependem de credenciais AWS configuradas.
