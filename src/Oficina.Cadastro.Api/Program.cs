@@ -38,7 +38,7 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-builder.Services.AddDevelopmentAuthentication(builder.Configuration, builder.Environment);
+builder.Services.AddOficinaAuthentication(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<IPasswordHashService, PasswordHashService>();
 builder.Services.AddCadastroApplication();
 builder.Services.AddCadastroInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());

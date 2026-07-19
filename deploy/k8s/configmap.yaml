@@ -8,7 +8,6 @@ metadata:
 data:
   ASPNETCORE_ENVIRONMENT: "Production"
   ASPNETCORE_URLS: "http://+:8080"
-  Authentication__Mode: "Jwt"
   Database__ApplyMigrations: "false"
   OpenTelemetry__Enabled: "true"
   OpenTelemetry__OtlpEndpoint: "http://otel-collector:4317"

@@ -1,7 +1,12 @@
+using System.Text.Encodings.Web;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Oficina.Cadastro.Api.Configuration;
 using Oficina.Cadastro.Api.Controllers;
 using Oficina.Cadastro.Api.Security;
@@ -171,7 +176,7 @@ public class ApplicationAndDomainTests
             .Build();
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            new ServiceCollection().AddDevelopmentAuthentication(config, new FakeEnvironment("Production")));
+            new ServiceCollection().AddOficinaAuthentication(config, new FakeEnvironment("Production")));
 
         Assert.Contains("Development", ex.Message);
     }
@@ -207,9 +212,7 @@ public class ApplicationAndDomainTests
     [Fact]
     public void Production_deve_rejeitar_connection_string_ausente_com_mensagem_clara()
     {
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Authentication:Mode"] = "Jwt" })
-            .Build();
+        var config = new ConfigurationBuilder().Build();
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
             config.ValidateCadastroProductionConfiguration(new FakeEnvironment("Production")));
@@ -282,6 +285,118 @@ public class ApplicationAndDomainTests
     {
         public string Hash(string senha) => $"HASH:{senha}";
         public bool Verificar(string senhaHash, string senha) => senhaHash == $"HASH:{senha}";
+    }
+
+    [Fact]
+    public void Fora_de_development_deve_registrar_identidade_confiavel()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddOficinaAuthentication(config, new FakeEnvironment("Production"));
+
+        var options = services.BuildServiceProvider()
+            .GetRequiredService<IOptions<AuthenticationOptions>>().Value;
+
+        Assert.Equal(TrustedIdentityAuthenticationDefaults.Scheme, options.DefaultScheme);
+    }
+
+    [Fact]
+    public async Task Identidade_confiavel_deve_materializar_claims_dos_cabecalhos()
+    {
+        var clienteId = Guid.NewGuid();
+
+        var result = await Autenticar(new Dictionary<string, string>
+        {
+            ["x-oficina-user-id"] = clienteId.ToString("D"),
+            ["x-oficina-user-role"] = PerfisAcesso.Cliente,
+            ["x-oficina-user-cpf"] = "12345678909",
+            ["x-oficina-user-name"] = "Fulano de Tal"
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Principal!.IsInRole(PerfisAcesso.Cliente));
+        Assert.Equal(clienteId.ToString("D"), result.Principal.FindFirst("clienteId")?.Value);
+        Assert.Null(result.Principal.FindFirst("funcionarioId"));
+    }
+
+    [Fact]
+    public async Task Identidade_confiavel_deve_separar_funcionario_de_cliente()
+    {
+        var funcionarioId = Guid.NewGuid();
+
+        var result = await Autenticar(new Dictionary<string, string>
+        {
+            ["x-oficina-user-id"] = funcionarioId.ToString("D"),
+            ["x-oficina-user-role"] = PerfisAcesso.Admin
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Principal!.IsInRole(PerfisAcesso.Admin));
+        Assert.Equal(funcionarioId.ToString("D"), result.Principal.FindFirst("funcionarioId")?.Value);
+        Assert.Null(result.Principal.FindFirst("clienteId"));
+    }
+
+    [Fact]
+    public async Task Identidade_confiavel_deve_recusar_perfil_desconhecido()
+    {
+        var result = await Autenticar(new Dictionary<string, string>
+        {
+            ["x-oficina-user-id"] = Guid.NewGuid().ToString("D"),
+            ["x-oficina-user-role"] = "Root"
+        });
+
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Identidade_confiavel_deve_recusar_identidade_sem_identificador()
+    {
+        var result = await Autenticar(new Dictionary<string, string>
+        {
+            ["x-oficina-user-role"] = PerfisAcesso.Admin
+        });
+
+        Assert.False(result.Succeeded);
+    }
+
+    [Fact]
+    public async Task Identidade_confiavel_deve_ignorar_requisicao_sem_cabecalhos()
+    {
+        var result = await Autenticar([]);
+
+        Assert.True(result.None);
+    }
+
+    private static async Task<AuthenticateResult> Autenticar(Dictionary<string, string> headers)
+    {
+        var handler = new TrustedIdentityAuthenticationHandler(
+            new SchemeOptionsMonitor(),
+            new LoggerFactory(),
+            UrlEncoder.Default);
+
+        var context = new DefaultHttpContext();
+        foreach (var header in headers)
+        {
+            context.Request.Headers[header.Key] = header.Value;
+        }
+
+        await handler.InitializeAsync(
+            new AuthenticationScheme(
+                TrustedIdentityAuthenticationDefaults.Scheme,
+                displayName: null,
+                handlerType: typeof(TrustedIdentityAuthenticationHandler)),
+            context);
+
+        return await handler.AuthenticateAsync();
+    }
+
+    private sealed class SchemeOptionsMonitor : IOptionsMonitor<AuthenticationSchemeOptions>
+    {
+        public AuthenticationSchemeOptions CurrentValue { get; } = new();
+        public AuthenticationSchemeOptions Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<AuthenticationSchemeOptions, string?> listener) => null;
     }
 
     private sealed class FakeEnvironment(string environmentName) : IWebHostEnvironment
