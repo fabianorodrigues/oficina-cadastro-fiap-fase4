@@ -61,14 +61,14 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory ./rendered/podidentity `
+            -OutputDirectory artifacts/k8s/podidentity `
             -RuntimeImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}" `
             -MigrationImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}-migration" `
             -AwsRegion us-east-1 `
             -WorkloadIdentityMode PodIdentity `
             -MigrationJobName "oficina-cadastro-migration-123456789-1"
           ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory ./rendered/irsa `
+            -OutputDirectory artifacts/k8s/irsa `
             -RuntimeImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}" `
             -MigrationImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}-migration" `
             -AwsRegion us-east-1 `
@@ -78,7 +78,7 @@ jobs:
             -MigrationJobName "oficina-cadastro-migration-123456789-1"
 
       - name: Kubeconform
-        run: docker run --rm -v "${PWD}/rendered:/manifests:ro" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas /manifests/podidentity
+        run: docker run --rm -v "${PWD}/artifacts/k8s:/manifests:ro" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas /manifests/podidentity
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4

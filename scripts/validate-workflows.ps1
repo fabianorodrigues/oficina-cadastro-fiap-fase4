@@ -14,16 +14,16 @@ $contracts = @{
     Ci = 'Estoque CI'; Manuals = @{ 'Estoque Deploy' = 'DEPLOY' }
   }
   'oficina-ordens-servico-fiap-fase4' = @{
-    Ci = 'Ordens CI'; Manuals = @{ 'Ordens Deploy' = 'DEPLOY' }
+    Ci = 'Ordens CI'; Manuals = @{ 'Ordens Deploy' = 'DEPLOY'; 'AWS E2E Validate' = 'VALIDATE' }
   }
   'oficina-auth-lambda-fiap-fase4' = @{
-    Ci = 'Auth CI'; Manuals = @{ 'Auth Deploy' = 'DEPLOY'; 'Auth JWT Secret Sync' = 'SYNC' }
+    Ci = 'Auth CI'; Manuals = @{ 'Auth Deploy' = 'DEPLOY' }
   }
   'oficina-infra-db-fiap-fase4' = @{
-    Ci = 'Infra DB CI'; Manuals = @{ 'Backend Terraform Bootstrap' = 'CREATE'; 'Infra DB Deploy' = 'APPLY'; 'Database Secrets Sync' = 'SYNC'; 'Database Bootstrap Deploy' = 'BOOTSTRAP' }
+    Ci = 'Database Infrastructure CI'; Manuals = @{ 'Database Infrastructure Deploy' = 'APPLY'; 'Database Bootstrap Deploy' = 'BOOTSTRAP' }
   }
   'oficina-infra-fiap-fase4' = @{
-    Ci = 'Platform CI'; Manuals = @{ 'Platform Deploy' = 'APPLY'; 'Ingress Deploy' = 'DEPLOY'; 'Entrypoint Deploy' = 'APPLY'; 'Observability Secret Sync' = 'SYNC'; 'Observability Validate' = 'VALIDATE' }
+    Ci = 'Platform CI'; Manuals = @{ 'Platform Deploy' = 'APPLY'; 'Entrypoint Deploy' = 'APPLY' }
   }
 }
 if (-not $contracts.ContainsKey($repo)) { throw "Repositorio sem contrato esperado: $repo" }

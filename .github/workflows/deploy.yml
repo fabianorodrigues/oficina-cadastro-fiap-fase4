@@ -6,6 +6,7 @@ on:
       confirmation:
         description: 'Type DEPLOY to publish Cadastro'
         required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,10 +17,11 @@ concurrency:
 
 jobs:
   deploy:
+    name: Deploy Cadastro
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Validate branch and confirmation
+      - name: Validate request
         run: |
           test "${GITHUB_REF}" = "refs/heads/main"
           test "${{ github.event.inputs.confirmation }}" = "DEPLOY"
@@ -32,7 +34,7 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Validate official config
+      - name: Validate configuration
         shell: pwsh
         run: ./scripts/validate-official-config.ps1
 
@@ -53,14 +55,16 @@ jobs:
         run: |
           set -euo pipefail
           aws sts get-caller-identity >/dev/null
-          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --query 'Parameter.Value' --output text)"
-          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --query 'Parameter.Value' --output text)"
+          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
+          namespace="$(aws ssm get-parameter --name /oficina/infra/cluster/namespace --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
+          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/runtime-db >/dev/null
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/migration-db >/dev/null
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/runtime-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/migration-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
           {
             echo "cluster=${cluster}"
+            echo "namespace=${namespace}"
             echo "ecr=${ecr}"
             echo "runtime_image=${ecr}:${GITHUB_SHA}"
             echo "migration_image=${ecr}:${GITHUB_SHA}-migration"
@@ -108,7 +112,7 @@ jobs:
 
       - name: Validate cluster prerequisites
         run: |
-          kubectl get namespace oficina
+          kubectl get namespace "${{ steps.platform.outputs.namespace }}"
           kubectl get nodes
           kubectl get csidriver secrets-store.csi.k8s.io
           kubectl get pods -n kube-system -l app=secrets-store-csi-driver
@@ -118,7 +122,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory ./rendered `
+            -OutputDirectory artifacts/k8s `
             -RuntimeImage "${{ steps.platform.outputs.runtime_image }}" `
             -MigrationImage "${{ steps.platform.outputs.migration_image }}" `
             -AwsRegion "${{ vars.AWS_REGION }}" `
@@ -127,28 +131,28 @@ jobs:
 
       - name: Apply dependencies
         run: |
-          kubectl apply -f rendered/service-account.yaml
-          kubectl apply -f rendered/secret-provider-class-runtime.yaml
-          kubectl apply -f rendered/secret-provider-class-migration.yaml
-          kubectl apply -f rendered/configmap.yaml
-          kubectl apply -f rendered/service.yaml
+          kubectl apply -f artifacts/k8s/service-account.yaml
+          kubectl apply -f artifacts/k8s/secret-provider-class-runtime.yaml
+          kubectl apply -f artifacts/k8s/secret-provider-class-migration.yaml
+          kubectl apply -f artifacts/k8s/configmap.yaml
+          kubectl apply -f artifacts/k8s/service.yaml
 
       - name: Run migration
         run: |
-          kubectl apply -f rendered/migration-job.yaml
-          kubectl wait --for=condition=complete "job/${{ steps.platform.outputs.migration_job }}" -n oficina --timeout=900s
-          kubectl logs "job/${{ steps.platform.outputs.migration_job }}" -n oficina --tail=200
+          kubectl apply -f artifacts/k8s/migration-job.yaml
+          kubectl wait --for=condition=complete "job/${{ steps.platform.outputs.migration_job }}" -n "${{ steps.platform.outputs.namespace }}" --timeout=900s
+          kubectl logs "job/${{ steps.platform.outputs.migration_job }}" -n "${{ steps.platform.outputs.namespace }}" --tail=200
 
-      - name: Deploy runtime
+      - name: Deploy workload
         run: |
-          kubectl apply -f rendered/deployment.yaml
-          kubectl rollout status deployment/oficina-cadastro -n oficina --timeout=600s
+          kubectl apply -f artifacts/k8s/deployment.yaml
+          kubectl rollout status deployment/oficina-cadastro -n "${{ steps.platform.outputs.namespace }}" --timeout=600s
 
-      - name: Health and readiness
+      - name: Validate health
         shell: bash
         run: |
           set -euo pipefail
-          kubectl port-forward -n oficina service/oficina-cadastro 18080:8080 >/tmp/cadastro-port-forward.log 2>&1 &
+          kubectl port-forward -n "${{ steps.platform.outputs.namespace }}" service/oficina-cadastro 18080:8080 >/tmp/cadastro-port-forward.log 2>&1 &
           pf_pid=$!
           trap 'kill $pf_pid || true' EXIT
           sleep 5
@@ -156,9 +160,9 @@ jobs:
 
       - name: Read-only validation
         shell: pwsh
-        run: ./scripts/validate-cadastro-deployment.ps1 -ExpectedImageTag "${{ github.sha }}" -MigrationJobName "${{ steps.platform.outputs.migration_job }}"
+        run: ./scripts/validate-cadastro-deployment.ps1 -Namespace "${{ steps.platform.outputs.namespace }}" -ExpectedImageTag "${{ github.sha }}" -MigrationJobName "${{ steps.platform.outputs.migration_job }}"
 
-      - name: Step summary
+      - name: Publish summary
         run: |
           {
             echo "Commit SHA: ${GITHUB_SHA}"
@@ -166,7 +170,7 @@ jobs:
             echo "Runtime image tag: ${GITHUB_SHA}"
             echo "Migration image tag: ${GITHUB_SHA}-migration"
             echo "Cluster: ${{ steps.platform.outputs.cluster }}"
-            echo "Namespace: oficina"
+            echo "Namespace: ${{ steps.platform.outputs.namespace }}"
             echo "Migration Job: ${{ steps.platform.outputs.migration_job }}"
             echo "Deployment status: rollout complete"
             echo "Smoke test status: passed"

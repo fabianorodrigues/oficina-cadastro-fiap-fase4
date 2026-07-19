@@ -78,7 +78,7 @@ Dependencias externas para execucao real:
 - Backend Terraform
 - Infra DB
 - Platform
-- Database Secrets Sync
+- Database Infrastructure Deploy
 - Database Bootstrap
 - ECR
 - EKS
