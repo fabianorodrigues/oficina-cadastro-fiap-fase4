@@ -1,0 +1,141 @@
+name: Cadastro Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY to publish Cadastro'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cadastro-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Cadastro
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECS_TASK_EXECUTION_ROLE_ARN: ${{ vars.ECS_TASK_EXECUTION_ROLE_ARN }}
+      ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+    steps:
+      - name: Validate request
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${{ github.event.inputs.confirmation }}" = "DEPLOY"
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Validate configuration
+        shell: pwsh
+        run: ./scripts/validate-official-config.ps1
+
+      - name: Validate deployment variables
+        shell: pwsh
+        run: |
+          foreach ($name in @('AWS_REGION', 'ECS_TASK_EXECUTION_ROLE_ARN', 'ECS_TASK_ROLE_ARN')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Repository Variable $name is required."
+            }
+          }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve platform metadata
+        id: platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity >/dev/null
+          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
+          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
+          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/target-group-arn --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/log-group-name --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/ecs/task-security-group-id --region "$AWS_REGION" >/dev/null
+          aws secretsmanager describe-secret --secret-id /oficina/cadastro/runtime-db >/dev/null
+          aws secretsmanager describe-secret --secret-id /oficina/cadastro/migration-db >/dev/null
+          aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/runtime-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
+          aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/migration-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
+          {
+            echo "cluster=${cluster}"
+            echo "ecr=${ecr}"
+            echo "runtime_image=${ecr}:${GITHUB_SHA}"
+            echo "migration_image=${ecr}:${GITHUB_SHA}-migration"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Restore
+        run: dotnet restore Oficina.Cadastro.sln
+
+      - name: Build
+        run: dotnet build Oficina.Cadastro.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Oficina.Cadastro.sln --configuration Release --no-build
+
+      - name: Build images
+        run: |
+          docker build -f Dockerfile -t "${{ steps.platform.outputs.runtime_image }}" .
+          docker build -f Dockerfile.migration -t "${{ steps.platform.outputs.migration_image }}" .
+
+      - name: Scan images
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ steps.platform.outputs.runtime_image }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Scan migration image
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ${{ steps.platform.outputs.migration_image }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Push images
+        run: |
+          docker push "${{ steps.platform.outputs.runtime_image }}"
+          docker push "${{ steps.platform.outputs.migration_image }}"
+
+      - name: Deploy to ECS
+        shell: pwsh
+        run: |
+          ./scripts/deploy-ecs-fargate.ps1 `
+            -RuntimeImage "${{ steps.platform.outputs.runtime_image }}" `
+            -MigrationImage "${{ steps.platform.outputs.migration_image }}" `
+            -AwsRegion "$env:AWS_REGION" `
+            -TaskExecutionRoleArn "$env:ECS_TASK_EXECUTION_ROLE_ARN" `
+            -TaskRoleArn "$env:ECS_TASK_ROLE_ARN"
+
+      - name: Publish summary
+        run: |
+          {
+            echo "Commit SHA: ${GITHUB_SHA}"
+            echo "ECR repository: ${{ steps.platform.outputs.ecr }}"
+            echo "Runtime image tag: ${GITHUB_SHA}"
+            echo "Migration image tag: ${GITHUB_SHA}-migration"
+            echo "Cluster: ${{ steps.platform.outputs.cluster }}"
+            echo "Service: oficina-cadastro"
+            echo "Deployment status: ECS stable"
+            echo "Target health: healthy"
+          } >> "${GITHUB_STEP_SUMMARY}"

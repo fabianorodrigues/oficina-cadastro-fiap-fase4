@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "application": {
+    "name": "oficina-cadastro",
+    "environment": "Production",
+    "containerPort": 8080
+  },
+  "aws": {
+    "clusterNameParameter": "/oficina/infra/cluster/name",
+    "ecrRepositoryParameter": "/oficina/infra/ecr/cadastro",
+    "regionFromWorkflow": true
+  },
+  "ecs": {
+    "serviceName": "oficina-cadastro",
+    "containerName": "oficina-cadastro",
+    "migrationContainerName": "oficina-cadastro-migration",
+    "desiredCount": 1,
+    "launchType": "FARGATE",
+    "targetGroupArnParameter": "/oficina/infra/ecs/cadastro/target-group-arn",
+    "logGroupNameParameter": "/oficina/infra/ecs/cadastro/log-group-name",
+    "taskSecurityGroupParameter": "/oficina/infra/ecs/task-security-group-id",
+    "privateSubnet1Parameter": "/oficina/infra/subnets/private/1",
+    "privateSubnet2Parameter": "/oficina/infra/subnets/private/2"
+  },
+  "secrets": {
+    "runtimeDatabase": "/oficina/cadastro/runtime-db",
+    "migrationDatabase": "/oficina/cadastro/migration-db"
+  },
+  "health": {
+    "path": "/health",
+    "readinessPath": "/ready",
+    "initialDelaySeconds": 10,
+    "periodSeconds": 10,
+    "timeoutSeconds": 3,
+    "failureThreshold": 6
+  },
+  "deployment": {
+    "progressDeadlineSeconds": 600,
+    "terminationGracePeriodSeconds": 30
+  }
+}
