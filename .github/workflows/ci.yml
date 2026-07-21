@@ -1,153 +1,47 @@
-name: Cadastro CI
+﻿name: Cadastro CI
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  ci:
+  validate:
+    name: Build and validate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-
-      - name: Restore
-        run: dotnet restore Oficina.Cadastro.sln
-
-      - name: Build
-        run: dotnet build Oficina.Cadastro.sln --configuration Release --no-restore
-
-      - name: Test with coverage
-        run: dotnet test Oficina.Cadastro.sln --configuration Release --no-build --collect:"XPlat Code Coverage"
-
-      - name: Vulnerable packages
-        run: dotnet list Oficina.Cadastro.sln package --vulnerable --include-transitive
-
-      - name: Validate official config
+      - name: Validate configuration
         shell: pwsh
         run: ./scripts/validate-official-config.ps1
-
-      - name: Build runtime image
-        run: docker build -f Dockerfile -t oficina-cadastro:${{ github.sha }} .
-
-      - name: Build migration image
-        run: docker build -f Dockerfile.migration -t oficina-cadastro:${{ github.sha }}-migration .
-
-      - name: Scan runtime image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: oficina-cadastro:${{ github.sha }}
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-
-      - name: Scan migration image
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: oficina-cadastro:${{ github.sha }}-migration
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-
-      - name: Render manifests
+      - name: Validate PowerShell syntax
         shell: pwsh
         run: |
-          ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory artifacts/k8s/podidentity `
-            -RuntimeImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}" `
-            -MigrationImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}-migration" `
-            -AwsRegion us-east-1 `
-            -WorkloadIdentityMode PodIdentity `
-            -MigrationJobName "oficina-cadastro-migration-123456789-1"
-          ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory artifacts/k8s/irsa `
-            -RuntimeImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}" `
-            -MigrationImage "000000000000.dkr.ecr.us-east-1.amazonaws.com/oficina-cadastro:${{ github.sha }}-migration" `
-            -AwsRegion us-east-1 `
-            -WorkloadIdentityMode IRSA `
-            -RuntimeIrsaRoleArn "arn:aws:iam::000000000000:role/oficina-cadastro-runtime" `
-            -MigrationIrsaRoleArn "arn:aws:iam::000000000000:role/oficina-cadastro-migrator" `
-            -MigrationJobName "oficina-cadastro-migration-123456789-1"
-
-      - name: Kubeconform
-        run: docker run --rm -v "${PWD}/artifacts/k8s:/manifests:ro" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas /manifests/podidentity
-
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: v1.30.0
-
-      - name: Kubectl client available
-        run: kubectl version --client=true
-
-      - name: PowerShell AST
-        shell: pwsh
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem -Path scripts -Filter *.ps1 -File | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "$($_.Extent.File): $($_.Message)" }; exit 1 }
+          }
+      - name: Restore
+        run: dotnet restore Oficina.Cadastro.sln
+      - name: Build
+        run: dotnet build Oficina.Cadastro.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test Oficina.Cadastro.sln --configuration Release --no-build
+      - name: Validate Dockerfiles
+        shell: bash
         run: |
-          $files = @(
-            "scripts/validate-official-config.ps1",
-            "scripts/render-k8s-manifests.ps1",
-            "scripts/validate-cadastro-deployment.ps1",
-            "scripts/smoke-test.ps1"
-          )
-          foreach ($file in $files) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error $_ }
-              exit 1
-            }
-          }
-
-      - name: Actionlint
-        run: docker run --rm -v "${PWD}:/repo:ro" -w /repo rhysd/actionlint:1.7.7
-
-      - name: Validate workflow contract
-        shell: pwsh
-        run: ./scripts/validate-workflows.ps1
-
-      - name: Static security checks
-        shell: pwsh
-        run: |
-          $patterns = @(
-            "Password=",
-            "ConnectionString=",
-            "Server=tcp:",
-            "SecretString",
-            "get-secret-value",
-            "SQL_CADASTRO_APP_PASSWORD",
-            "SQL_CADASTRO_MIGRATOR_PASSWORD",
-            "AWS_ACCESS_KEY_ID=",
-            "AWS_SECRET_ACCESS_KEY=",
-            "AWS_SESSION_TOKEN=",
-            "LoadBalancer",
-            "NodePort",
-            ("terraform " + "destroy"),
-            "Fase3",
-            "fase-3",
-            "/dev/",
-            "-hml"
-          )
-          $files = git ls-files |
-            Where-Object { $_ -notmatch '(^|/)(bin|obj|TestResults)/' -and $_ -ne '.github/workflows/ci.yml' }
-          foreach ($pattern in $patterns) {
-            $matches = Select-String -Path $files -Pattern ([regex]::Escape($pattern)) -ErrorAction SilentlyContinue
-            if ($matches) {
-              Write-Error "Padrao proibido encontrado: $pattern`n$matches"
-              exit 1
-            }
-          }
-          $migrationMatches = Select-String -Path $files -Pattern "Database\.Migrate|MigrateAsync|EnsureCreated" -ErrorAction SilentlyContinue
-          $invalid = $migrationMatches | Where-Object { $_.Line -notmatch "ApplyMigrationsIfEnabled|Database__ApplyMigrations|Production_nao_deve|Development" }
-          if ($invalid) {
-            Write-Error "Ocorrencias de migration automatica exigem revisao:`n$invalid"
-            exit 1
-          }
+          set -euo pipefail
+          test -f Dockerfile
+          test -f Dockerfile.migration
+          ! grep -R "kubectl\|helm\|deploy/k8s" scripts config

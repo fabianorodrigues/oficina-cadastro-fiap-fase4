@@ -20,10 +20,11 @@ if ($config.version -ne 1) { Add-Error "version deve ser 1." }
 if ($config.application.name -ne "oficina-cadastro") { Add-Error "application.name invalido." }
 if ($config.application.environment -ne "Production") { Add-Error "application.environment deve ser Production." }
 if ($config.application.containerPort -lt 1 -or $config.application.containerPort -gt 65535) { Add-Error "containerPort invalido." }
-if ($config.kubernetes.namespace -ne "oficina") { Add-Error "namespace invalido." }
-if ($config.kubernetes.deploymentName -ne "oficina-cadastro") { Add-Error "deploymentName invalido." }
-if ($config.kubernetes.serviceName -ne "oficina-cadastro") { Add-Error "serviceName invalido." }
-if ($config.kubernetes.replicas -ne 1) { Add-Error "replicas deve ser 1." }
+if ($config.ecs.serviceName -ne "oficina-cadastro") { Add-Error "ecs.serviceName invalido." }
+if ($config.ecs.containerName -ne "oficina-cadastro") { Add-Error "ecs.containerName invalido." }
+if ($config.ecs.migrationContainerName -ne "oficina-cadastro-migration") { Add-Error "ecs.migrationContainerName invalido." }
+if ($config.ecs.desiredCount -ne 1) { Add-Error "desiredCount deve ser 1." }
+if ($config.ecs.launchType -ne "FARGATE") { Add-Error "launchType deve ser FARGATE." }
 if ($config.secrets.runtimeDatabase -ne "/oficina/cadastro/runtime-db") { Add-Error "secret runtime invalido." }
 if ($config.secrets.migrationDatabase -ne "/oficina/cadastro/migration-db") { Add-Error "secret migration invalido." }
 if ($config.secrets.runtimeDatabase -eq $config.secrets.migrationDatabase) { Add-Error "runtime e migration devem usar secrets diferentes." }
@@ -31,6 +32,23 @@ if (-not $config.secrets.runtimeDatabase.StartsWith("/oficina/")) { Add-Error "s
 if (-not $config.secrets.migrationDatabase.StartsWith("/oficina/")) { Add-Error "secret migration deve iniciar com /oficina/." }
 if ($config.health.path -ne "/health") { Add-Error "health.path invalido." }
 if ($config.health.readinessPath -ne "/ready") { Add-Error "health.readinessPath invalido." }
+
+$paths = @(
+    $config.aws.clusterNameParameter,
+    $config.aws.ecrRepositoryParameter,
+    $config.ecs.targetGroupArnParameter,
+    $config.ecs.logGroupNameParameter,
+    $config.ecs.taskSecurityGroupParameter,
+    $config.ecs.privateSubnet1Parameter,
+    $config.ecs.privateSubnet2Parameter,
+    $config.secrets.runtimeDatabase,
+    $config.secrets.migrationDatabase
+)
+foreach ($path in $paths) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not $path.StartsWith("/oficina/")) {
+        Add-Error "path fora do prefixo /oficina/: $path"
+    }
+}
 
 $forbiddenPatterns = @(
     "Password\s*=",

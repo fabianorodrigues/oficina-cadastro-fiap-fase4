@@ -38,11 +38,8 @@ public static class CadastroConfigurationExtensions
             throw new InvalidOperationException("Modo de autenticacao Development nao pode ser utilizado em Production.");
         }
 
-        if (Directory.Exists(SecretsDirectory))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException("Diretorio de secrets esperado nao esta disponivel.");
+        // ECS injects Secrets Manager values as environment variables, while the
+        // previous runtime mounted them as files. A valid connection string is
+        // the required production contract.
     }
 }

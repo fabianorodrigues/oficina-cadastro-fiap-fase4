@@ -20,6 +20,10 @@ jobs:
     name: Deploy Cadastro
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECS_TASK_EXECUTION_ROLE_ARN: ${{ vars.ECS_TASK_EXECUTION_ROLE_ARN }}
+      ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
     steps:
       - name: Validate request
         run: |
@@ -38,8 +42,14 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-official-config.ps1
 
-      - name: Validate AWS region
-        run: test -n "${{ vars.AWS_REGION }}"
+      - name: Validate deployment variables
+        shell: pwsh
+        run: |
+          foreach ($name in @('AWS_REGION', 'ECS_TASK_EXECUTION_ROLE_ARN', 'ECS_TASK_ROLE_ARN')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Repository Variable $name is required."
+            }
+          }
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
@@ -55,24 +65,24 @@ jobs:
         run: |
           set -euo pipefail
           aws sts get-caller-identity >/dev/null
-          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
-          namespace="$(aws ssm get-parameter --name /oficina/infra/cluster/namespace --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
-          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --region "${{ vars.AWS_REGION }}" --query 'Parameter.Value' --output text)"
+          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
+          ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
+          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/target-group-arn --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/log-group-name --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/ecs/task-security-group-id --region "$AWS_REGION" >/dev/null
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/runtime-db >/dev/null
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/migration-db >/dev/null
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/runtime-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/migration-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
           {
             echo "cluster=${cluster}"
-            echo "namespace=${namespace}"
             echo "ecr=${ecr}"
             echo "runtime_image=${ecr}:${GITHUB_SHA}"
             echo "migration_image=${ecr}:${GITHUB_SHA}-migration"
-            echo "migration_job=oficina-cadastro-migration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v3
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Restore
         run: dotnet restore Oficina.Cadastro.sln
@@ -107,60 +117,15 @@ jobs:
           docker push "${{ steps.platform.outputs.runtime_image }}"
           docker push "${{ steps.platform.outputs.migration_image }}"
 
-      - name: Configure kubeconfig
-        run: aws eks update-kubeconfig --name "${{ steps.platform.outputs.cluster }}" --region "${{ vars.AWS_REGION }}"
-
-      - name: Validate cluster prerequisites
-        run: |
-          kubectl get namespace "${{ steps.platform.outputs.namespace }}"
-          kubectl get nodes
-          kubectl get csidriver secrets-store.csi.k8s.io
-          kubectl get pods -n kube-system -l app=secrets-store-csi-driver
-          kubectl get pods -n kube-system -l app=secrets-store-csi-driver-provider-aws
-
-      - name: Render manifests
+      - name: Deploy to ECS
         shell: pwsh
         run: |
-          ./scripts/render-k8s-manifests.ps1 `
-            -OutputDirectory artifacts/k8s `
+          ./scripts/deploy-ecs-fargate.ps1 `
             -RuntimeImage "${{ steps.platform.outputs.runtime_image }}" `
             -MigrationImage "${{ steps.platform.outputs.migration_image }}" `
-            -AwsRegion "${{ vars.AWS_REGION }}" `
-            -WorkloadIdentityMode PodIdentity `
-            -MigrationJobName "${{ steps.platform.outputs.migration_job }}"
-
-      - name: Apply dependencies
-        run: |
-          kubectl apply -f artifacts/k8s/service-account.yaml
-          kubectl apply -f artifacts/k8s/secret-provider-class-runtime.yaml
-          kubectl apply -f artifacts/k8s/secret-provider-class-migration.yaml
-          kubectl apply -f artifacts/k8s/configmap.yaml
-          kubectl apply -f artifacts/k8s/service.yaml
-
-      - name: Run migration
-        run: |
-          kubectl apply -f artifacts/k8s/migration-job.yaml
-          kubectl wait --for=condition=complete "job/${{ steps.platform.outputs.migration_job }}" -n "${{ steps.platform.outputs.namespace }}" --timeout=900s
-          kubectl logs "job/${{ steps.platform.outputs.migration_job }}" -n "${{ steps.platform.outputs.namespace }}" --tail=200
-
-      - name: Deploy workload
-        run: |
-          kubectl apply -f artifacts/k8s/deployment.yaml
-          kubectl rollout status deployment/oficina-cadastro -n "${{ steps.platform.outputs.namespace }}" --timeout=600s
-
-      - name: Validate health
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl port-forward -n "${{ steps.platform.outputs.namespace }}" service/oficina-cadastro 18080:8080 >/tmp/cadastro-port-forward.log 2>&1 &
-          pf_pid=$!
-          trap 'kill $pf_pid || true' EXIT
-          sleep 5
-          pwsh ./scripts/smoke-test.ps1 -BaseUrl http://127.0.0.1:18080 -ExpectedEnvironment Production
-
-      - name: Read-only validation
-        shell: pwsh
-        run: ./scripts/validate-cadastro-deployment.ps1 -Namespace "${{ steps.platform.outputs.namespace }}" -ExpectedImageTag "${{ github.sha }}" -MigrationJobName "${{ steps.platform.outputs.migration_job }}"
+            -AwsRegion "$env:AWS_REGION" `
+            -TaskExecutionRoleArn "$env:ECS_TASK_EXECUTION_ROLE_ARN" `
+            -TaskRoleArn "$env:ECS_TASK_ROLE_ARN"
 
       - name: Publish summary
         run: |
@@ -170,8 +135,7 @@ jobs:
             echo "Runtime image tag: ${GITHUB_SHA}"
             echo "Migration image tag: ${GITHUB_SHA}-migration"
             echo "Cluster: ${{ steps.platform.outputs.cluster }}"
-            echo "Namespace: ${{ steps.platform.outputs.namespace }}"
-            echo "Migration Job: ${{ steps.platform.outputs.migration_job }}"
-            echo "Deployment status: rollout complete"
-            echo "Smoke test status: passed"
+            echo "Service: oficina-cadastro"
+            echo "Deployment status: ECS stable"
+            echo "Target health: healthy"
           } >> "${GITHUB_STEP_SUMMARY}"
