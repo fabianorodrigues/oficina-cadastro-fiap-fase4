@@ -1,54 +1,64 @@
 # oficina-cadastro
 
-> Microsserviço de clientes, veículos, funcionários e catálogo de serviços da Oficina.
-> **.NET 10** · **ASP.NET Core** · **EF Core / SQL Server** · **EKS** · **GitHub Actions**
+Microsserviço de **clientes, veículos, funcionários e catálogo de serviços** da solução **Oficina**.
+
+![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
+![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-API-512BD4?logo=dotnet&logoColor=white)
+![EF Core](https://img.shields.io/badge/EF%20Core-SQL%20Server-CC2927?logo=microsoftsqlserver&logoColor=white)
+![ECS Fargate](https://img.shields.io/badge/AWS-ECS%20Fargate-FF9900?logo=amazonaws&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
 
 ---
 
-## A solução
+## Sumário
 
-A **Oficina** é uma plataforma de gestão de oficina mecânica distribuída em **6 repositórios** que compõem um único sistema na AWS. O cliente acessa uma API Gateway que autentica na borda e encaminha o tráfego para três microsserviços .NET 10 em EKS, que se comunicam por HTTP e por filas SQS FIFO e persistem em um RDS SQL Server compartilhado.
-
-| Repositório | Responsabilidade |
-|---|---|
-| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma EKS e entrypoint de API |
-| [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e emissão de token |
-| **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços |
-| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas |
-| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento |
+- [Visão geral](#visão-geral)
+- [Ordem de deploy da solução](#ordem-de-deploy-da-solução)
+- [Arquitetura](#arquitetura)
+- [Autenticação](#autenticação)
+- [Endpoints](#endpoints)
+- [O que consome e o que publica](#o-que-consome-e-o-que-publica)
+- [Configuração](#configuração)
+- [Como executar](#como-executar)
+- [Validação](#validação)
+- [Execução local](#execução-local)
+- [Limitações conhecidas](#limitações-conhecidas)
+- [Próximas etapas](#próximas-etapas)
 
 ---
 
-## Ordem de deploy
+## Visão geral
+
+A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AWS e distribuída em **6 repositórios** que compõem um único sistema. O cliente acessa uma **API Gateway HTTP**, que autentica na borda por uma **Lambda authorizer** e encaminha o tráfego, via **VPC Link**, para um **ALB interno** que roteia para três microsserviços **.NET 10 em ECS Fargate**. Os serviços se comunicam por HTTP interno e por filas **SQS FIFO**, e persistem em um **RDS SQL Server** compartilhado.
+
+| Repositório | Responsabilidade | Etapas |
+|---|---|:---:|
+| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform | 1 e 3 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma ECS/ALB e entrada de API | 2, 6 e 7 |
+| [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e validação de token | 4 |
+| **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços | 5 |
+| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 5 |
+| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento | 5 e 8 |
+
+**Papel deste repositório:** domínio de dados mestres da oficina — clientes, veículos, funcionários (a tabela consultada pela autenticação) e catálogo de serviços com sua receita de peças e insumos. É um serviço de leitura e escrita síncrona; não publica nem consome mensagens.
+
+---
+
+## Ordem de deploy da solução
 
 | # | Repositório | Workflow | Confirmação |
-|---|---|---|---|
+|:---:|---|---|:---:|
 | 1 | oficina-infra-db | Database Infrastructure Deploy | `APPLY` |
 | 2 | oficina-infra | Platform Deploy | `APPLY` |
 | 3 | oficina-infra-db | Database Bootstrap | `BOOTSTRAP` |
 | 4 | oficina-auth-lambda | Auth Deploy | `DEPLOY` |
 | **5** | **oficina-cadastro** · estoque · ordens-servico | **Deploy** | `DEPLOY` |
 | 6 | oficina-infra | Entrypoint Deploy | `APPLY` |
-| 7 | oficina-infra | Observability Validate | `VALIDATE` |
+| 7 | oficina-infra | Observability Validate | — |
 | 8 | oficina-ordens-servico | AWS E2E Validate | `VALIDATE` |
 
-> Este repositório é uma das três publicações da **etapa 5**, que podem rodar em paralelo. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3.
->
-> Não há dependência de deploy entre os três, mas **recomenda-se publicar este primeiro**: é ele que cria a tabela de funcionários usada pela autenticação e as rotas internas consultadas pelas ordens de serviço.
-
----
-
-## Responsabilidade
-
-Domínio de dados mestres da oficina:
-
-- **Clientes** — pessoa física ou jurídica, com documento validado.
-- **Veículos** — placa, RENAVAM e modelo, vinculados a um cliente.
-- **Funcionários** — usuários internos, com perfil de acesso e senha. **É a tabela consultada pela autenticação.**
-- **Catálogo de serviços** — cada serviço com mão de obra e a receita de peças e insumos que consome.
-
-Não publica nem consome mensagens: é um serviço de consulta e escrita síncrona, chamado pela borda e pelas ordens de serviço.
+> [!IMPORTANT]
+> Este é um dos três serviços da **etapa 5**, que podem rodar em paralelo. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Não há dependência de deploy entre os três, mas **recomenda-se publicar este primeiro**: ele cria a tabela de funcionários usada pela autenticação e as rotas internas consultadas pelas ordens de serviço.
 
 ---
 
@@ -56,33 +66,35 @@ Não publica nem consome mensagens: é um serviço de consulta e escrita síncro
 
 ```mermaid
 flowchart LR
-    subgraph Cadastro["oficina-cadastro"]
+    subgraph Cadastro["oficina-cadastro · ECS Fargate"]
         direction TB
         Pub["Rotas de negócio<br/>clientes · veículos · serviços"]
         Adm["Rotas administrativas<br/>funcionários"]
         Int["Rotas internas<br/>consulta entre serviços"]
     end
 
-    API["API Gateway"] --> Pub
-    API --> Adm
-    Ordens["oficina-ordens-servico"] -->|"HTTP interno"| Int
+    API["API Gateway"] --> ALB["ALB interno"]
+    ALB --> Pub
+    ALB --> Adm
+    Ordens["oficina-ordens-servico"] -->|"HTTP interno via ALB"| Int
     Cadastro --> DB[("OficinaCadastroDb")]
     Auth["Lambda auth-cpf"] -->|"somente leitura"| DB
+
+    classDef svc fill:#2da44e,stroke:#166534,color:#fff
+    classDef data fill:#CC2927,stroke:#7a1717,color:#fff
+    class Pub,Adm,Int svc
+    class DB data
 ```
 
-Clean Architecture em quatro projetos: **Domain** (agregados e objetos de valor), **Application** (casos de uso, validações e portas), **Infrastructure** (EF Core, mapeamentos, repositórios e migrações) e **Api** (controladores, middlewares e segurança). As dependências apontam sempre para dentro.
+Clean Architecture em quatro projetos: **Domain** (agregados e objetos de valor), **Application** (casos de uso, validações e portas), **Infrastructure** (EF Core, repositórios e migrações) e **Api** (controladores, middlewares e segurança). As dependências apontam sempre para dentro.
 
 ---
 
 ## Autenticação
 
-O token é validado pelo autorizador da API Gateway, que devolve as claims à borda. A API Gateway as converte em cabeçalhos de identidade (`x-oficina-user-id`, `x-oficina-user-cpf`, `x-oficina-user-role`, `x-oficina-user-name`) e os injeta na requisição encaminhada.
+O token é validado pelo autorizador da API Gateway, que devolve as *claims* à borda. A API Gateway as converte em cabeçalhos de identidade (`x-oficina-user-id`, `x-oficina-user-cpf`, `x-oficina-user-role`, `x-oficina-user-name`) e os injeta na requisição encaminhada.
 
-Este serviço materializa esses cabeçalhos como claims e aplica as políticas de autorização por perfil. Requisição sem identidade válida é rejeitada pela política padrão, que exige usuário autenticado; apenas `/health` e `/ready` são anônimos.
-
-Os cabeçalhos são confiáveis porque o balanceador é interno e o acesso está restrito ao VPC Link — nenhum chamador externo alcança o serviço sem passar pela borda. Manter essa restrição é parte do modelo de segurança.
-
-No perfil de desenvolvimento, um modo alternativo aceita cabeçalhos `X-Dev-*` para simular perfil e usuário sem token. Ele **só é ativado em desenvolvimento** — a aplicação lança erro se for solicitado em qualquer outro perfil.
+Este serviço materializa esses cabeçalhos como *claims* e aplica as políticas de autorização por perfil. Requisição sem identidade válida é rejeitada; apenas `/health` e `/ready` são anônimos. Os cabeçalhos são confiáveis porque o ALB é interno e o acesso está restrito ao VPC Link. No perfil de desenvolvimento, um modo alternativo aceita cabeçalhos `X-Dev-*` para simular usuário sem token — **ativado apenas em desenvolvimento**.
 
 ---
 
@@ -97,33 +109,30 @@ No perfil de desenvolvimento, um modo alternativo aceita cabeçalhos `X-Dev-*` p
 | `GET` `POST` | `/api/servicos` | Funcionário ou administrador |
 | `GET` `PUT` | `/api/servicos/{id}` | Funcionário ou administrador |
 | `GET` `POST` | `/api/admin/funcionarios` | Administrador |
-| `GET` `PUT` | `/api/admin/funcionarios/{id}` | Administrador |
-| `PATCH` | `/api/admin/funcionarios/{id}/alterar-senha` | Administrador |
-| `PATCH` | `/api/admin/funcionarios/{id}/ativar` · `/inativar` | Administrador |
+| `GET` `PUT` `PATCH` | `/api/admin/funcionarios/{id}` · `/alterar-senha` · `/ativar` · `/inativar` | Administrador |
 | `GET` | `/health` · `/ready` | Anônimo |
 
-**Rotas internas** (`/api/internal/...`), consumidas apenas pelas ordens de serviço e **não publicadas na API Gateway**: consulta de cliente por identificador ou documento, de veículo por identificador ou placa, e consulta de serviços em lote.
+**Rotas internas** (`/api/internal/...`), consumidas apenas pelas ordens de serviço e **não publicadas na API Gateway**: consulta de cliente por identificador ou documento, de veículo por identificador ou placa, e de serviços em lote.
 
-`/health` responde de imediato; `/ready` verifica a conexão com o banco e responde indisponível se ela falhar.
+`/health` responde de imediato; `/ready` verifica a conexão com o banco.
 
 ---
 
-## Contrato de integração
+## O que consome e o que publica
 
 ### Consome
 
 | Valor | Origem | Criado por |
 |---|---|---|
-| Cluster e namespace | `/oficina/infra/cluster/{name,namespace}` | oficina-infra |
-| Registro de imagem | `/oficina/infra/ecr/cadastro` | oficina-infra |
-| Credencial de runtime | `/oficina/cadastro/runtime-db` | oficina-infra-db |
-| Credencial de migração | `/oficina/cadastro/migration-db` | oficina-infra-db |
+| Cluster, grupo de segurança e subnets das tasks | `/oficina/infra/cluster/name` · `/oficina/infra/ecs/task-security-group-id` · `/oficina/infra/subnets/private/{1,2}` | oficina-infra |
+| Registro de imagem, target group e grupo de log | `/oficina/infra/ecr/cadastro` · `/oficina/infra/ecs/cadastro/{target-group-arn,log-group-name}` | oficina-infra |
+| Credenciais de runtime e migração | `/oficina/cadastro/{runtime,migration}-db` | oficina-infra-db |
 
-As credenciais são montadas no pod pelo driver CSI de segredos — **não passam por variável de ambiente nem por objeto Secret do Kubernetes**.
+As credenciais são injetadas na task como **ECS secrets** a partir do Secrets Manager — não passam por variável de ambiente em texto claro.
 
 ### Publica
 
-Rotas HTTP no cluster, expostas pelo Ingress do repositório [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), e o esquema do banco de cadastro, aplicado pelo Job de migração.
+O serviço ECS Fargate registrado no *target group* do ALB e o esquema do banco de cadastro, aplicado por uma task de migração.
 
 ---
 
@@ -131,48 +140,61 @@ Rotas HTTP no cluster, expostas pelo Ingress do repositório [oficina-infra](htt
 
 Configure em **Settings → Secrets and variables → Actions** do repositório.
 
-| Tipo | Nome | Obrigatório |
-|---|---|---|
-| Secret | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` | **Sim** |
-| Variable | `AWS_REGION` | **Sim** |
+| Tipo | Nome | Uso | Obrigatório |
+|---|---|---|:---:|
+| Secret | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` | Credenciais temporárias da AWS | **Sim** |
+| Variable | `AWS_REGION` | Região dos recursos | **Sim** |
+| Variable | `ECS_TASK_EXECUTION_ROLE_ARN` | Role de execução das tasks ECS | **Sim** |
+| Variable | `ECS_TASK_ROLE_ARN` | Role de aplicação das tasks ECS | **Sim** |
 
-Não há mais nada a configurar neste repositório: cluster, namespace, registro de imagem e credenciais são descobertos em tempo de execução a partir do que as etapas anteriores publicaram.
+### Papéis IAM das tasks ECS — não provisionados automaticamente
+
+O deploy registra *task definitions* Fargate e reutiliza duas roles IAM que **precisam existir antes da etapa 5**. Nenhum workflow da solução as cria.
+
+| Variable | Trust | Permissões mínimas |
+|---|---|---|
+| `ECS_TASK_EXECUTION_ROLE_ARN` | `ecs-tasks.amazonaws.com` | `AmazonECSTaskExecutionRolePolicy` e `secretsmanager:GetSecretValue` nos segredos `/oficina/cadastro/{runtime,migration}-db` |
+| `ECS_TASK_ROLE_ARN` | `ecs-tasks.amazonaws.com` | Permissões de runtime da aplicação (o cadastro não usa SQS) |
+
+> [!NOTE]
+> É o **mesmo par de roles** usado pelo bootstrap (infra-db) e pelos serviços de estoque e ordens. Crie uma vez e reutilize; para estoque e ordens, a `ECS_TASK_ROLE_ARN` precisa adicionalmente das ações SQS.
 
 ### Variáveis de ambiente da aplicação
 
-Definidas pelo ConfigMap do repositório; nenhuma precisa ser configurada no GitHub.
+Definidas pelo deploy na *task definition*; nenhuma precisa ser configurada no GitHub.
 
 | Chave | Valor no ambiente publicado |
 |---|---|
-| `ASPNETCORE_ENVIRONMENT` | Produção |
-| `ConnectionStrings__OficinaCadastroDb` | Montada pelo CSI a partir do segredo |
-| `Database__ApplyMigrations` | Desativado — migrações rodam em Job próprio |
-| `OpenTelemetry__Enabled` · `OpenTelemetry__OtlpEndpoint` | Instrumentação ativa, sem destino configurado |
+| `ASPNETCORE_ENVIRONMENT` | `Production` |
+| `ConnectionStrings__OficinaCadastroDb` | Injetada como ECS secret a partir do Secrets Manager |
+| `Database__ApplyMigrations` | Desativado — migrações rodam em task própria |
 
-A aplicação **recusa-se a iniciar** fora do perfil de desenvolvimento se a cadeia de conexão estiver vazia ou se o diretório de segredos não estiver montado.
+A aplicação **recusa-se a iniciar** fora de desenvolvimento se a cadeia de conexão estiver vazia.
 
 ---
 
-## Executar pelo GitHub Actions
+## Como executar
 
 **Actions → Cadastro Deploy → Run workflow → `confirmation` = `DEPLOY`**
 
-Roda apenas na branch `main`. Sequência: valida a requisição e a configuração → descobre cluster, namespace e registro de imagem → compila e testa → constrói as imagens de runtime e de migração → **varredura de vulnerabilidades, que interrompe o deploy em achado alto ou crítico** → envia ao registro → aplica os manifestos → **executa o Job de migração e aguarda sua conclusão** → aplica o Deployment e aguarda a substituição → teste de fumaça por encaminhamento de porta.
+Roda apenas na branch `main`. Sequência: valida a requisição e as variáveis → descobre cluster, registro de imagem, *target group* e grupo de log → compila e testa → constrói as imagens de runtime e de migração → **varredura de vulnerabilidades, que interrompe o deploy em achado alto ou crítico** → envia ao ECR → **executa a task de migração (ECS Run Task) e aguarda seu encerramento** → registra a *task definition* de runtime → **cria ou atualiza o serviço ECS** e aguarda ficar estável → confirma que há pelo menos um destino saudável no ALB.
 
-As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se o Job de migração falhar, o Deployment não é atualizado.
+As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se a task de migração falhar, o serviço não é atualizado.
 
 ---
 
-## Validar
+## Validação
 
 ### Pelo Console AWS
 
 | Serviço | O que verificar |
 |---|---|
 | **ECR** | Repositório de cadastro com a imagem do commit publicado |
-| **EKS → Recursos** | Deployment disponível e Job de migração concluído no namespace da aplicação |
+| **ECS → Serviços** | `oficina-cadastro` estável, com a task de runtime em execução |
+| **ECS → Tasks** | Task de migração `oficina-cadastro-migration` encerrada com código 0 |
+| **EC2 → Target Groups** | Destino do cadastro saudável |
 
-### Pela CLI
+### Pela AWS CLI
 
 <details>
 <summary>Comandos de validação</summary>
@@ -181,16 +203,15 @@ As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se o Jo
 REGIAO=<sua-regiao>
 CLUSTER=$(aws ssm get-parameter --name /oficina/infra/cluster/name \
   --region "$REGIAO" --query 'Parameter.Value' --output text)
-aws eks update-kubeconfig --name "$CLUSTER" --region "$REGIAO"
 
-kubectl get deployment,pod -n oficina -l app.kubernetes.io/name=oficina-cadastro
-kubectl get jobs -n oficina
-kubectl logs -n oficina -l app.kubernetes.io/name=oficina-cadastro --tail=50
+aws ecs describe-services --cluster "$CLUSTER" --services oficina-cadastro \
+  --region "$REGIAO" --query 'services[0].{Status:status,Desejado:desiredCount,Rodando:runningCount}' \
+  --output table
 
-# Verificação de saúde sem expor o serviço
-kubectl port-forward -n oficina svc/oficina-cadastro 18080:8080 &
-curl -s http://localhost:18080/health
-curl -s http://localhost:18080/ready
+TG=$(aws ssm get-parameter --name /oficina/infra/ecs/cadastro/target-group-arn \
+  --region "$REGIAO" --query 'Parameter.Value' --output text)
+aws elbv2 describe-target-health --target-group-arn "$TG" --region "$REGIAO" \
+  --query 'TargetHealthDescriptions[].TargetHealth.State' --output text
 ```
 
 </details>
@@ -199,7 +220,7 @@ Após a **etapa 6**, a verificação de saúde também responde pela API públic
 
 ---
 
-## Executar e validar localmente
+## Execução local
 
 O ambiente local completo — banco, filas e os três serviços — é orquestrado pelo repositório [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4), que constrói este serviço a partir do diretório vizinho. Consulte as instruções lá para subir a solução integrada.
 
@@ -218,13 +239,12 @@ Os testes cobrem regras de domínio e de aplicação, persistência (com banco e
 ## Limitações conhecidas
 
 - **Réplica única, sem escala automática**, por decisão de projeto.
-- **Cobertura coletada mas sem limite mínimo.** Não há portão de qualidade que reprove queda de cobertura.
-- **Artefatos de compilação versionados.** Diretórios de saída do build estão no repositório e deveriam ser ignorados.
-- **Porta do serviço divergente.** Este serviço expõe a porta 8080 no cluster, enquanto os outros dois expõem a 80.
+- **Cobertura coletada, sem limite mínimo** de qualidade.
+- **Emissão de token não acontece aqui.** Este serviço apenas mantém a tabela de funcionários; o login vive em [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4).
 
 ---
 
-## Próxima etapa
+## Próximas etapas
 
 Publique os demais serviços da **etapa 5**, se ainda não o fez:
 
