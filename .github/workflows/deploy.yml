@@ -74,11 +74,13 @@ jobs:
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/migration-db >/dev/null
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/runtime-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
           aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/migration-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
+          image_tag="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           {
             echo "cluster=${cluster}"
             echo "ecr=${ecr}"
-            echo "runtime_image=${ecr}:${GITHUB_SHA}"
-            echo "migration_image=${ecr}:${GITHUB_SHA}-migration"
+            echo "image_tag=${image_tag}"
+            echo "runtime_image=${ecr}:${image_tag}"
+            echo "migration_image=${ecr}:${image_tag}-migration"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Login to ECR
@@ -132,8 +134,8 @@ jobs:
           {
             echo "Commit SHA: ${GITHUB_SHA}"
             echo "ECR repository: ${{ steps.platform.outputs.ecr }}"
-            echo "Runtime image tag: ${GITHUB_SHA}"
-            echo "Migration image tag: ${GITHUB_SHA}-migration"
+            echo "Runtime image tag: ${{ steps.platform.outputs.image_tag }}"
+            echo "Migration image tag: ${{ steps.platform.outputs.image_tag }}-migration"
             echo "Cluster: ${{ steps.platform.outputs.cluster }}"
             echo "Service: oficina-cadastro"
             echo "Deployment status: ECS stable"

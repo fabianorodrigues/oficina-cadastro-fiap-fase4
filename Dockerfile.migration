@@ -28,4 +28,4 @@ WORKDIR /app
 COPY --from=build /app/efbundle /app/efbundle
 RUN chmod +x /app/efbundle
 USER $APP_UID
-ENTRYPOINT ["/app/efbundle"]
+ENTRYPOINT ["/bin/sh", "-c", "/app/efbundle --connection \"$ConnectionStrings__OficinaCadastroDb\""]
