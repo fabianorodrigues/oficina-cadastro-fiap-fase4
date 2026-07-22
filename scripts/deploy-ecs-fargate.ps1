@@ -231,8 +231,8 @@ $desiredCount = [int]$config.ecs.desiredCount
 Assert-RdsIngressRule -RdsSecurityGroupId $rdsSecurityGroup -TaskSecurityGroupId $securityGroup
 
 $baseEnvironment = @(
-    New-EnvironmentEntry "ASPNETCORE_ENVIRONMENT" "Production",
-    New-EnvironmentEntry "AWS_REGION" $AwsRegion,
+    New-EnvironmentEntry "ASPNETCORE_ENVIRONMENT" "Production"
+    New-EnvironmentEntry "AWS_REGION" $AwsRegion
     New-EnvironmentEntry "Authentication__Mode" ""
 )
 
@@ -246,18 +246,18 @@ if ($appName -eq "oficina-estoque") {
     $eventsDlqUrl = Get-SsmValue $config.queues.eventsDlqUrlParameter
     $connectionStringName = "ConnectionStrings__OficinaEstoqueDb"
     $extraEnvironment = @(
-        New-EnvironmentEntry "Messaging__Sqs__Enabled" "true",
-        New-EnvironmentEntry "Messaging__Sqs__Region" $AwsRegion,
-        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueName" "oficina-estoque-comandos.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueName" "oficina-estoque-comandos-dlq.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__EventsQueueName" "oficina-ordens-eventos.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueUrl" $commandsUrl,
-        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueUrl" $commandsDlqUrl,
-        New-EnvironmentEntry "Messaging__Sqs__EventsQueueUrl" $eventsUrl,
-        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueUrl" $eventsDlqUrl,
-        New-EnvironmentEntry "Messaging__Sqs__ConsumerConcurrency" "$($config.queues.consumerConcurrency)",
-        New-EnvironmentEntry "Messaging__Sqs__MaxMessages" "$($config.queues.maxMessagesPerReceive)",
-        New-EnvironmentEntry "Messaging__Sqs__WaitTimeSeconds" "$($config.queues.waitTimeSeconds)",
+        New-EnvironmentEntry "Messaging__Sqs__Enabled" "true"
+        New-EnvironmentEntry "Messaging__Sqs__Region" $AwsRegion
+        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueName" "oficina-estoque-comandos.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueName" "oficina-estoque-comandos-dlq.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__EventsQueueName" "oficina-ordens-eventos.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueUrl" $commandsUrl
+        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueUrl" $commandsDlqUrl
+        New-EnvironmentEntry "Messaging__Sqs__EventsQueueUrl" $eventsUrl
+        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueUrl" $eventsDlqUrl
+        New-EnvironmentEntry "Messaging__Sqs__ConsumerConcurrency" "$($config.queues.consumerConcurrency)"
+        New-EnvironmentEntry "Messaging__Sqs__MaxMessages" "$($config.queues.maxMessagesPerReceive)"
+        New-EnvironmentEntry "Messaging__Sqs__WaitTimeSeconds" "$($config.queues.waitTimeSeconds)"
         New-EnvironmentEntry "Messaging__Sqs__VisibilityTimeoutSeconds" "$($config.queues.visibilityTimeoutSeconds)"
     )
 }
@@ -270,27 +270,27 @@ if ($appName -eq "oficina-ordens-servico") {
     $albDns = Get-SsmValue $config.services.cadastroBaseUrlParameter
     $connectionStringName = "ConnectionStrings__DefaultConnection"
     $extraEnvironment = @(
-        New-EnvironmentEntry "DistributedFlow__Enabled" "true",
-        New-EnvironmentEntry "Integrations__Cadastro__BaseUrl" "http://$albDns",
-        New-EnvironmentEntry "Integrations__Estoque__BaseUrl" "http://$albDns",
-        New-EnvironmentEntry "Messaging__Sqs__Enabled" "true",
-        New-EnvironmentEntry "Messaging__Sqs__Region" $AwsRegion,
-        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueName" "oficina-estoque-comandos.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__EventsQueueName" "oficina-ordens-eventos.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueName" "oficina-ordens-eventos-dlq.fifo",
-        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueUrl" $commandsUrl,
-        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueUrl" $commandsDlqUrl,
-        New-EnvironmentEntry "Messaging__Sqs__EventsQueueUrl" $eventsUrl,
-        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueUrl" $eventsDlqUrl,
-        New-EnvironmentEntry "Messaging__Sqs__ConsumerConcurrency" "$($config.queues.consumerConcurrency)",
-        New-EnvironmentEntry "Messaging__Sqs__MaxMessagesPerReceive" "$($config.queues.maxMessagesPerReceive)",
-        New-EnvironmentEntry "Messaging__Sqs__WaitTimeSeconds" "$($config.queues.waitTimeSeconds)",
-        New-EnvironmentEntry "Messaging__Sqs__VisibilityTimeoutSeconds" "$($config.queues.visibilityTimeoutSeconds)",
-        New-EnvironmentEntry "Payments__UseMock" "$($config.payments.useMock)".ToLowerInvariant(),
-        New-EnvironmentEntry "Payments__Mode" "Mock",
-        New-EnvironmentEntry "Payments__MockBehavior" "$($config.payments.mockBehavior)",
-        New-EnvironmentEntry "Payments__ExternalApiEnabled" "false",
-        New-EnvironmentEntry "Payments__ExternalWebhookEnabled" "false",
+        New-EnvironmentEntry "DistributedFlow__Enabled" "true"
+        New-EnvironmentEntry "Integrations__Cadastro__BaseUrl" "http://$albDns"
+        New-EnvironmentEntry "Integrations__Estoque__BaseUrl" "http://$albDns"
+        New-EnvironmentEntry "Messaging__Sqs__Enabled" "true"
+        New-EnvironmentEntry "Messaging__Sqs__Region" $AwsRegion
+        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueName" "oficina-estoque-comandos.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__EventsQueueName" "oficina-ordens-eventos.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueName" "oficina-ordens-eventos-dlq.fifo"
+        New-EnvironmentEntry "Messaging__Sqs__CommandsQueueUrl" $commandsUrl
+        New-EnvironmentEntry "Messaging__Sqs__CommandsDlqQueueUrl" $commandsDlqUrl
+        New-EnvironmentEntry "Messaging__Sqs__EventsQueueUrl" $eventsUrl
+        New-EnvironmentEntry "Messaging__Sqs__EventsDlqQueueUrl" $eventsDlqUrl
+        New-EnvironmentEntry "Messaging__Sqs__ConsumerConcurrency" "$($config.queues.consumerConcurrency)"
+        New-EnvironmentEntry "Messaging__Sqs__MaxMessagesPerReceive" "$($config.queues.maxMessagesPerReceive)"
+        New-EnvironmentEntry "Messaging__Sqs__WaitTimeSeconds" "$($config.queues.waitTimeSeconds)"
+        New-EnvironmentEntry "Messaging__Sqs__VisibilityTimeoutSeconds" "$($config.queues.visibilityTimeoutSeconds)"
+        New-EnvironmentEntry "Payments__UseMock" "$($config.payments.useMock)".ToLowerInvariant()
+        New-EnvironmentEntry "Payments__Mode" "Mock"
+        New-EnvironmentEntry "Payments__MockBehavior" "$($config.payments.mockBehavior)"
+        New-EnvironmentEntry "Payments__ExternalApiEnabled" "false"
+        New-EnvironmentEntry "Payments__ExternalWebhookEnabled" "false"
         New-EnvironmentEntry "Payments__ContractStatus" "$($config.payments.contractStatus)"
     )
 }
