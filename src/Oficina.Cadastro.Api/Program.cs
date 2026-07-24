@@ -13,7 +13,6 @@ using Oficina.Cadastro.Infrastructure.Persistencia;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables();
-builder.Configuration.AddCadastroKeyPerFile(builder.Environment);
 builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole(options =>
 {

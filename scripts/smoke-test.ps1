@@ -3,27 +3,51 @@ param(
     [string]$ExpectedEnvironment
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Invoke-SmokeGet([string]$Path) {
-    $uri = "$($BaseUrl.TrimEnd('/'))$Path"
+$script:Base = $BaseUrl.TrimEnd('/')
+
+function Test-SmokeEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedStatus
+    )
+
+    $uri = "$script:Base$Path"
     try {
-        $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 10 -MaximumRedirection 0
+        $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 10 -MaximumRedirection 0 -UseBasicParsing -ErrorAction Stop
     }
-    catch {
-        throw "Smoke test falhou em ${Path}: $($_.Exception.Message)"
+    catch {        
+        $resp = $null
+        $respProp = $_.Exception.PSObject.Properties['Response']
+        if ($respProp) { $resp = $respProp.Value }
+        if ($resp) {
+            $code = $null
+            try { $code = [int]$resp.StatusCode } catch { $code = $null }
+            throw "[app] $Path respondeu HTTP $code (esperado 200)."
+        }
+        throw "[infra] Nao foi possivel acessar ${uri}: $($_.Exception.Message)"
     }
 
-    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
-        throw "Smoke test falhou em $Path com status $($response.StatusCode)."
+    if ([int]$response.StatusCode -ne 200) {
+        throw "[app] $Path respondeu HTTP $($response.StatusCode) (esperado 200)."
     }
 
-    Write-Host "$Path OK ($($response.StatusCode))"
+    $status = $null
+    try { $status = ($response.Content | ConvertFrom-Json).status } catch { $status = $null }
+    if ($status -ne $ExpectedStatus) {
+        throw "[app] $Path retornou corpo invalido (status='$status', esperado '$ExpectedStatus')."
+    }
+
+    Write-Host "  OK  $Path -> $status"
 }
 
-Invoke-SmokeGet "/health"
-Invoke-SmokeGet "/ready"
+Test-SmokeEndpoint -Path "/health" -ExpectedStatus "Healthy"
+Test-SmokeEndpoint -Path "/ready" -ExpectedStatus "Ready"
 
 if ($ExpectedEnvironment) {
     Write-Host "ExpectedEnvironment informado: $ExpectedEnvironment"
 }
+
+Write-Host "Smoke test de cadastro concluido."
