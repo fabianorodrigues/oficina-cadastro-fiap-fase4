@@ -35,7 +35,7 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 
 | Repositório | Responsabilidade | Etapas |
 |---|---|:---:|
-| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform | 1 e 3 |
+| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos, estado do Terraform e admin inicial | 1, 3 e 5.1 |
 | [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB e entrada de API | 2 e 8 |
 | [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e validação de token | 4 |
 | **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços | 5 |
@@ -52,9 +52,10 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 |:---:|---|---|:---:|
 | 1 | oficina-infra-db | Database Infrastructure Deploy | `APPLY` |
 | 2 | oficina-infra | Platform Deploy | `APPLY` |
-| 3 | oficina-infra-db | Database Bootstrap | `BOOTSTRAP` |
+| 3 | oficina-infra-db | Database Bootstrap (estrutura) | `BOOTSTRAP` |
 | 4 | oficina-auth-lambda | Auth Deploy | `DEPLOY` |
 | **5** | **oficina-cadastro** | **Cadastro Deploy** | `DEPLOY` |
+| 5.1 | oficina-infra-db | Initial Admin Provision | `PROVISION_ADMIN` |
 | 6 | oficina-estoque | Estoque Deploy | `DEPLOY` |
 | 7 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
 | 8 | oficina-infra | Entrypoint Deploy | `APPLY` |
@@ -63,7 +64,7 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 Após a etapa 8, o **Observability Validate** (oficina-infra) está disponível como validação **opcional**.
 
 > [!IMPORTANT]
-> Este é o primeiro dos três serviços. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Não há dependência de deploy entre as etapas 5, 6 e 7 — podem rodar em paralelo —, mas **este vem primeiro na ordem recomendada**: ele cria a tabela de funcionários usada pela autenticação e as rotas internas consultadas pelas ordens de serviço.
+> Este é o primeiro dos três serviços. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Ele vem antes da etapa **5.1** porque suas migrations criam `dbo.Funcionarios`, tabela usada pelo bootstrap do administrador inicial e pela autenticação. As etapas 6 e 7 não dependem desse admin para publicar os workloads, mas a etapa 9 depende dele para fazer login.
 
 ---
 
@@ -271,13 +272,13 @@ Os testes cobrem regras de domínio e de aplicação, persistência (com banco e
 
 ## Próxima etapa
 
-**Etapa 6 — obrigatória.** Pré-condição: Deployment `oficina-cadastro` disponível no cluster, Migration Job concluído com sucesso e destino saudável no *target group*.
+**Etapa 5.1 — obrigatória no primeiro provisionamento e antes da validação funcional.** Pré-condição: Deployment `oficina-cadastro` disponível no cluster, Migration Job concluído com sucesso e destino saudável no *target group*.
 
-**→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)** — seção [Como executar](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4#como-executar).
+**→ [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4)** — seção [Como executar → Etapa 5.1](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4#etapa-51-admin-inicial). Execute o **Initial Admin Provision** com `confirmation` = `PROVISION_ADMIN`.
 
-Depois vêm a **etapa 7** em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) e a **etapa 8** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway.
+Depois siga para a **etapa 6** em [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4), a **etapa 7** em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) e a **etapa 8** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway.
 
 > [!NOTE]
-> Com as migrations deste serviço aplicadas, o administrador inicial já pode ser provisionado: reexecute o **Database Bootstrap** com `provision_admin_user` = `true` em [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4#usuário-administrador-inicial--segunda-execução-do-bootstrap). Ele é a credencial exigida pela etapa 9.
+> A etapa 5.1 é o ponto que transforma os secrets `ADMIN_INICIAL_CPF` e `ADMIN_INICIAL_PASSWORD` em um funcionário administrador real no banco. Em redeploys normais do Cadastro ela é opcional se o admin já existe; sem ela no primeiro deploy, a collection Postman da etapa 9 não consegue autenticar.
 
 Para revisar a etapa anterior, volte a **[oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4)** (etapa 4).
