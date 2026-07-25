@@ -1,0 +1,34 @@
+# Configuracao nao sensivel do oficina-cadastro.
+# Os marcadores delimitados por sublinhados duplos sao resolvidos dentro da EC2,
+# no comando de Deploy, a partir dos parametros SSM publicados pela plataforma.
+#
+# Sao dois ConfigMaps por decisao: o Migration Job recebe apenas a configuracao
+# base. Dar a ele a configuracao de mensageria faria o migrator carregar
+# contexto de runtime que nao usa.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-cadastro-config
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/name: oficina-cadastro
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: oficina
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_URLS: "http://+:8080"
+  AWS_REGION: "__AWS_REGION__"
+  Authentication__Mode: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-cadastro-migration-config
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/name: oficina-cadastro
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: oficina
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  AWS_REGION: "__AWS_REGION__"
