@@ -20,9 +20,5 @@ public static class CadastroConfigurationExtensions
         {
             throw new InvalidOperationException("Modo de autenticacao Development nao pode ser utilizado em Production.");
         }
-
-        // ECS injects Secrets Manager values as environment variables, while the
-        // previous runtime mounted them as files. A valid connection string is
-        // the required production contract.
     }
 }

@@ -19,11 +19,14 @@ RUN dotnet publish src/Oficina.Cadastro.Api/Oficina.Cadastro.Api.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
 WORKDIR /app
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /tmp/aws-rds-global-bundle.pem
 RUN cat /tmp/aws-rds-global-bundle.pem >> /etc/ssl/certs/ca-certificates.crt \
     && rm /tmp/aws-rds-global-bundle.pem
-ENV ASPNETCORE_URLS=http://+:8080 \
-    ASPNETCORE_ENVIRONMENT=Production
+ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 COPY --from=build /app/publish ./
 USER $APP_UID

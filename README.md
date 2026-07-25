@@ -23,7 +23,7 @@ Microsserviço de **clientes, veículos, funcionários e catálogo de serviços*
 - [Validação](#validação)
 - [Execução local](#execução-local)
 - [Limitações conhecidas](#limitações-conhecidas)
-- [Próximas etapas](#próximas-etapas)
+- [Próxima etapa](#próxima-etapa)
 
 ---
 
@@ -34,11 +34,11 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 | Repositório | Responsabilidade | Etapas |
 |---|---|:---:|
 | [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform | 1 e 3 |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma ECS/ALB e entrada de API | 2, 6 e 7 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma ECS/ALB e entrada de API | 2 e 8 |
 | [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e validação de token | 4 |
 | **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços | 5 |
-| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 5 |
-| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento | 5 e 8 |
+| [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 6 |
+| [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) | Ordens de serviço, orçamento e saga de pagamento | 7 e 9 |
 
 **Papel deste repositório:** domínio de dados mestres da oficina — clientes, veículos, funcionários (a tabela consultada pela autenticação) e catálogo de serviços com sua receita de peças e insumos. É um serviço de leitura e escrita síncrona; não publica nem consome mensagens.
 
@@ -52,13 +52,16 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 | 2 | oficina-infra | Platform Deploy | `APPLY` |
 | 3 | oficina-infra-db | Database Bootstrap | `BOOTSTRAP` |
 | 4 | oficina-auth-lambda | Auth Deploy | `DEPLOY` |
-| **5** | **oficina-cadastro** · estoque · ordens-servico | **Deploy** | `DEPLOY` |
-| 6 | oficina-infra | Entrypoint Deploy | `APPLY` |
-| 7 | oficina-infra | Observability Validate | — |
-| 8 | oficina-ordens-servico | AWS E2E Validate | `VALIDATE` |
+| **5** | **oficina-cadastro** | **Cadastro Deploy** | `DEPLOY` |
+| 6 | oficina-estoque | Estoque Deploy | `DEPLOY` |
+| 7 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
+| 8 | oficina-infra | Entrypoint Deploy | `APPLY` |
+| 9 | oficina-ordens-servico | Collection Postman (execução manual) | — |
+
+Após a etapa 8, o **Observability Validate** (oficina-infra) está disponível como validação **opcional**.
 
 > [!IMPORTANT]
-> Este é um dos três serviços da **etapa 5**, que podem rodar em paralelo. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Não há dependência de deploy entre os três, mas **recomenda-se publicar este primeiro**: ele cria a tabela de funcionários usada pela autenticação e as rotas internas consultadas pelas ordens de serviço.
+> Este é o primeiro dos três serviços. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Não há dependência de deploy entre as etapas 5, 6 e 7 — podem rodar em paralelo —, mas **este vem primeiro na ordem recomendada**: ele cria a tabela de funcionários usada pela autenticação e as rotas internas consultadas pelas ordens de serviço.
 
 ---
 
@@ -216,7 +219,7 @@ aws elbv2 describe-target-health --target-group-arn "$TG" --region "$REGIAO" \
 
 </details>
 
-Após a **etapa 6**, a verificação de saúde também responde pela API pública, em `/health/cadastro`.
+Após a **etapa 8**, a verificação de saúde também responde pela API pública, em `/health/cadastro`.
 
 ---
 
@@ -244,11 +247,15 @@ Os testes cobrem regras de domínio e de aplicação, persistência (com banco e
 
 ---
 
-## Próximas etapas
+## Próxima etapa
 
-Publique os demais serviços da **etapa 5**, se ainda não o fez:
+**Etapa 6 — obrigatória.** Pré-condição: serviço `oficina-cadastro` estável no ECS, task de migração encerrada com código 0 e destino saudável no *target group*.
 
-- **→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)**
-- **→ [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4)**
+**→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)** — seção [Como executar](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4#como-executar).
 
-Com os três no ar, siga para a **etapa 6** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway.
+Depois vêm a **etapa 7** em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) e a **etapa 8** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway.
+
+> [!NOTE]
+> Com as migrations deste serviço aplicadas, o administrador inicial já pode ser provisionado: reexecute o **Database Bootstrap** com `provision_admin_user` = `true` em [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4#usuário-administrador-inicial--segunda-execução-do-bootstrap). Ele é a credencial exigida pela etapa 9.
+
+Para revisar a etapa anterior, volte a **[oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4)** (etapa 4).
