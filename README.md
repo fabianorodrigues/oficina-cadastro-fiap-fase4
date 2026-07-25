@@ -1,5 +1,7 @@
 # oficina-cadastro
 
+![Coverage](https://img.shields.io/badge/line%20coverage-85.40%25-brightgreen.svg)
+
 Microsserviço de **clientes, veículos, funcionários e catálogo de serviços** da solução **Oficina**.
 
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
@@ -249,6 +251,12 @@ dotnet build -c Release
 dotnet test
 ```
 
+### Evidências de cobertura de testes
+
+- Line coverage real: **85.40%** (462/541 linhas), medido em 25/07/2026 com `dotnet test Oficina.Cadastro.sln --configuration Release --settings .runsettings --collect:"XPlat Code Coverage"`.
+- CI: [Cadastro CI](https://github.com/fabianorodrigues/oficina-cadastro-fiap-fase4/actions/workflows/ci.yml) executa o gate local de 80% e publica o artefato `coverage-${run_id}`.
+- Configuração de cobertura: [`.runsettings`](.runsettings) e [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 Os testes cobrem regras de domínio e de aplicação, persistência (com banco em contêiner) e contratos públicos.
 
 ---
@@ -256,7 +264,7 @@ Os testes cobrem regras de domínio e de aplicação, persistência (com banco e
 ## Limitações conhecidas
 
 - **Réplica única, sem escala automática**, por decisão de projeto.
-- **Cobertura coletada, sem limite mínimo** de qualidade.
+- **Cobertura com gate local de 80%.** O CI reprova quando a cobertura de linhas fica abaixo do mínimo.
 - **Emissão de token não acontece aqui.** Este serviço apenas mantém a tabela de funcionários; o login vive em [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4).
 
 ---
