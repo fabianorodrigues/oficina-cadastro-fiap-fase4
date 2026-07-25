@@ -11,9 +11,6 @@ coverage
 .env
 .env.*
 appsettings.*.local.json
-terraform
-deploy
-docs
 *.tfstate
 *.tfplan
 *.user
