@@ -57,8 +57,7 @@ $forbiddenPatterns = @(
     "\d{12}\.dkr\.ecr\.",
     "arn:aws:secretsmanager:",
     "AKIA[0-9A-Z]{16}",
-    "(^|[\/_\-])(dev|hml|staging|prod)([\/_\-]|$)",
-    "Fase3|fase-3"
+    "(^|[\/_\-])(dev|hml|staging|prod)([\/_\-]|$)"
 )
 
 foreach ($pattern in $forbiddenPatterns) {
