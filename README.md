@@ -5,7 +5,7 @@ Microsserviço de **clientes, veículos, funcionários e catálogo de serviços*
 ![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
 ![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-API-512BD4?logo=dotnet&logoColor=white)
 ![EF Core](https://img.shields.io/badge/EF%20Core-SQL%20Server-CC2927?logo=microsoftsqlserver&logoColor=white)
-![ECS Fargate](https://img.shields.io/badge/AWS-ECS%20Fargate-FF9900?logo=amazonaws&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/AWS-EC2%20%C2%B7%20K3s-FF9900?logo=amazonaws&logoColor=white)
 ![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
 
 ---
@@ -29,12 +29,12 @@ Microsserviço de **clientes, veículos, funcionários e catálogo de serviços*
 
 ## Visão geral
 
-A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AWS e distribuída em **6 repositórios** que compõem um único sistema. O cliente acessa uma **API Gateway HTTP**, que autentica na borda por uma **Lambda authorizer** e encaminha o tráfego, via **VPC Link**, para um **ALB interno** que roteia para três microsserviços **.NET 10 em ECS Fargate**. Os serviços se comunicam por HTTP interno e por filas **SQS FIFO**, e persistem em um **RDS SQL Server** compartilhado.
+A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AWS e distribuída em **6 repositórios** que compõem um único sistema. O cliente acessa uma **API Gateway HTTP**, que autentica na borda por uma **Lambda authorizer** e encaminha o tráfego, via **VPC Link**, para um **ALB interno** que roteia para três microsserviços **.NET 10 em Kubernetes (K3s single-node numa EC2 privada)**. Os serviços se comunicam por HTTP interno e por filas **SQS FIFO**, e persistem em um **RDS SQL Server** compartilhado.
 
 | Repositório | Responsabilidade | Etapas |
 |---|---|:---:|
 | [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos e estado do Terraform | 1 e 3 |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma ECS/ALB e entrada de API | 2 e 8 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB e entrada de API | 2 e 8 |
 | [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e validação de token | 4 |
 | **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços | 5 |
 | [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 6 |
@@ -69,7 +69,7 @@ Após a etapa 8, o **Observability Validate** (oficina-infra) está disponível 
 
 ```mermaid
 flowchart LR
-    subgraph Cadastro["oficina-cadastro · ECS Fargate"]
+    subgraph Cadastro["oficina-cadastro · Kubernetes (K3s)"]
         direction TB
         Pub["Rotas de negócio<br/>clientes · veículos · serviços"]
         Adm["Rotas administrativas<br/>funcionários"]
@@ -127,15 +127,15 @@ Este serviço materializa esses cabeçalhos como *claims* e aplica as políticas
 
 | Valor | Origem | Criado por |
 |---|---|---|
-| Cluster, grupo de segurança e subnets das tasks | `/oficina/infra/cluster/name` · `/oficina/infra/ecs/task-security-group-id` · `/oficina/infra/subnets/private/{1,2}` | oficina-infra |
-| Registro de imagem, target group e grupo de log | `/oficina/infra/ecr/cadastro` · `/oficina/infra/ecs/cadastro/{target-group-arn,log-group-name}` | oficina-infra |
+| Node do cluster e namespace | `/oficina/infra/k8s/instance-id` · `/oficina/infra/k8s/namespace` | oficina-infra |
+| Registro de imagem, target group e NodePort | `/oficina/infra/ecr/cadastro` · `/oficina/infra/services/cadastro/{target-group-arn,node-port}` | oficina-infra |
 | Credenciais de runtime e migração | `/oficina/cadastro/{runtime,migration}-db` | oficina-infra-db |
 
-As credenciais são injetadas na task como **ECS secrets** a partir do Secrets Manager — não passam por variável de ambiente em texto claro.
+As credenciais são lidas do Secrets Manager **dentro da EC2** e materializadas como **Secrets Kubernetes** — não passam pelo runner do GitHub, pelo S3 nem por parâmetro do Run Command. São dois Secrets distintos: `oficina-cadastro-database-app` para o Deployment e `oficina-cadastro-database-migration` para o Migration Job.
 
 ### Publica
 
-O serviço ECS Fargate registrado no *target group* do ALB e o esquema do banco de cadastro, aplicado por uma task de migração.
+O Deployment e o Service NodePort registrados no *target group* do ALB, e o esquema do banco, aplicado por um Migration Job nomeado com o commit SHA.
 
 ---
 
@@ -147,30 +147,33 @@ Configure em **Settings → Secrets and variables → Actions** do repositório.
 |---|---|---|:---:|
 | Secret | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` | Credenciais temporárias da AWS | **Sim** |
 | Variable | `AWS_REGION` | Região dos recursos | **Sim** |
-| Variable | `ECS_TASK_EXECUTION_ROLE_ARN` | Role de execução das tasks ECS | **Sim** |
-| Variable | `ECS_TASK_ROLE_ARN` | Role de aplicação das tasks ECS | **Sim** |
+| Variable | `SONAR_PROJECT_KEY` · `SONAR_ORGANIZATION` | Projeto e organização no SonarCloud | **Sim** |
+| Secret | `SONAR_TOKEN` | Token de análise do SonarCloud | **Sim** |
+| Variable | `TF_STATE_BUCKET` | Fallback do bucket que recebe o pacote de manifests | Não |
 
-### Papéis IAM das tasks ECS — não provisionados automaticamente
+### Papéis IAM — não provisionados automaticamente
 
-O deploy registra *task definitions* Fargate e reutiliza duas roles IAM que **precisam existir antes da etapa 5**. Nenhum workflow da solução as cria.
+Nenhum workflow desta solução cria ou altera recursos IAM. O deploy não passa
+role alguma: os Pods herdam a role do **instance profile da EC2 do cluster**,
+configurada uma única vez em `oficina-infra` pela variável `INSTANCE_PROFILE_NAME`.
 
-| Variable | Trust | Permissões mínimas |
-|---|---|---|
-| `ECS_TASK_EXECUTION_ROLE_ARN` | `ecs-tasks.amazonaws.com` | `AmazonECSTaskExecutionRolePolicy` e `secretsmanager:GetSecretValue` nos segredos `/oficina/cadastro/{runtime,migration}-db` |
-| `ECS_TASK_ROLE_ARN` | `ecs-tasks.amazonaws.com` | Permissões de runtime da aplicação (o cadastro não usa SQS) |
+Essa role precisa permitir, no mínimo: registro no Systems Manager,
+`ecr:GetAuthorizationToken` e pull das imagens, `secretsmanager:GetSecretValue`
+nos segredos `/oficina/cadastro/{runtime,migration}-db` e `ssm:GetParameter`
+com `kms:Decrypt` em `/oficina/deploy/*`.
 
 > [!NOTE]
-> É o **mesmo par de roles** usado pelo bootstrap (infra-db) e pelos serviços de estoque e ordens. Crie uma vez e reutilize; para estoque e ordens, a `ECS_TASK_ROLE_ARN` precisa adicionalmente das ações SQS.
-
+> Sem IRSA e sem Pod Identity, todos os Pods do namespace compartilham essa role.
+> O detalhe está registrado como risco em `docs/ARCHITECTURE.md`.
 ### Variáveis de ambiente da aplicação
 
-Definidas pelo deploy na *task definition*; nenhuma precisa ser configurada no GitHub.
+Definidas pelo deploy no ConfigMap e nos Secrets do namespace; nenhuma precisa ser configurada no GitHub.
 
 | Chave | Valor no ambiente publicado |
 |---|---|
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
-| `ConnectionStrings__OficinaCadastroDb` | Injetada como ECS secret a partir do Secrets Manager |
-| `Database__ApplyMigrations` | Desativado — migrações rodam em task própria |
+| `ConnectionStrings__OficinaCadastroDb` | Materializada como Secret Kubernetes dentro da EC2, a partir do Secrets Manager |
+| `Database__ApplyMigrations` | Desativado — migrações rodam em Migration Job próprio |
 
 A aplicação **recusa-se a iniciar** fora de desenvolvimento se a cadeia de conexão estiver vazia.
 
@@ -180,9 +183,18 @@ A aplicação **recusa-se a iniciar** fora de desenvolvimento se a cadeia de con
 
 **Actions → Cadastro Deploy → Run workflow → `confirmation` = `DEPLOY`**
 
-Roda apenas na branch `main`. Sequência: valida a requisição e as variáveis → descobre cluster, registro de imagem, *target group* e grupo de log → compila e testa → constrói as imagens de runtime e de migração → **varredura de vulnerabilidades, que interrompe o deploy em achado alto ou crítico** → envia ao ECR → **executa a task de migração (ECS Run Task) e aguarda seu encerramento** → registra a *task definition* de runtime → **cria ou atualiza o serviço ECS** e aguarda ficar estável → confirma que há pelo menos um destino saudável no ALB.
+Roda apenas na branch `main`. Sequência: valida a requisição → valida o contrato
+oficial → **SonarCloud begin** → compila → testa com cobertura → **gate local de
+80%** → **SonarCloud end com Quality Gate** → descobre registro de imagem, node,
+target group e NodePort → constrói as imagens de runtime e de migração →
+**varredura de vulnerabilidades, que interrompe o deploy em achado alto ou
+crítico** → envia ao ECR → **Stage** (pacote de manifests transportado por URL
+pré-assinada, com o Run Command recebendo apenas o nome de um SecureString e o
+hash) → remove o objeto S3 e o SecureString → **Deploy** (pull das duas imagens,
+ConfigMap, Secrets, Migration Job, Deployment, Service, rollout e capacidade do
+node) → confirma o *target group* saudável.
 
-As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se a task de migração falhar, o serviço não é atualizado.
+As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se o Migration Job falhar, o Deployment e o Service não são aplicados.
 
 ---
 
@@ -193,8 +205,8 @@ As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se a ta
 | Serviço | O que verificar |
 |---|---|
 | **ECR** | Repositório de cadastro com a imagem do commit publicado |
-| **ECS → Serviços** | `oficina-cadastro` estável, com a task de runtime em execução |
-| **ECS → Tasks** | Task de migração `oficina-cadastro-migration` encerrada com código 0 |
+| **EC2 → Instâncias** | Node do cluster `running` e `Online` no Systems Manager |
+| **Systems Manager → Run Command** | Comandos de Stage e de Deploy com status `Success` |
 | **EC2 → Target Groups** | Destino do cadastro saudável |
 
 ### Pela AWS CLI
@@ -204,14 +216,15 @@ As imagens são marcadas com o hash do commit, nunca com uma tag móvel. Se a ta
 
 ```bash
 REGIAO=<sua-regiao>
-CLUSTER=$(aws ssm get-parameter --name /oficina/infra/cluster/name \
+
+# Node do cluster e resposta do Systems Manager
+INSTANCIA=$(aws ssm get-parameter --name /oficina/infra/k8s/instance-id \
   --region "$REGIAO" --query 'Parameter.Value' --output text)
+aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCIA" \
+  --region "$REGIAO" --query 'InstanceInformationList[0].PingStatus' --output text
 
-aws ecs describe-services --cluster "$CLUSTER" --services oficina-cadastro \
-  --region "$REGIAO" --query 'services[0].{Status:status,Desejado:desiredCount,Rodando:runningCount}' \
-  --output table
-
-TG=$(aws ssm get-parameter --name /oficina/infra/ecs/cadastro/target-group-arn \
+# Saude do destino no ALB
+TG=$(aws ssm get-parameter --name /oficina/infra/services/cadastro/target-group-arn \
   --region "$REGIAO" --query 'Parameter.Value' --output text)
 aws elbv2 describe-target-health --target-group-arn "$TG" --region "$REGIAO" \
   --query 'TargetHealthDescriptions[].TargetHealth.State' --output text
@@ -249,7 +262,7 @@ Os testes cobrem regras de domínio e de aplicação, persistência (com banco e
 
 ## Próxima etapa
 
-**Etapa 6 — obrigatória.** Pré-condição: serviço `oficina-cadastro` estável no ECS, task de migração encerrada com código 0 e destino saudável no *target group*.
+**Etapa 6 — obrigatória.** Pré-condição: Deployment `oficina-cadastro` disponível no cluster, Migration Job concluído com sucesso e destino saudável no *target group*.
 
 **→ [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4)** — seção [Como executar](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4#como-executar).
 

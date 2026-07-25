@@ -7,6 +7,14 @@ on:
         description: 'Type DEPLOY to publish Cadastro'
         required: true
         type: string
+      transport:
+        description: 'Manifest transport: s3 (default) or ssm (fallback)'
+        required: false
+        default: s3
+        type: choice
+        options:
+          - s3
+          - ssm
 
 permissions:
   contents: read
@@ -15,23 +23,33 @@ concurrency:
   group: cadastro-deploy
   cancel-in-progress: false
 
+env:
+  SOLUTION: Oficina.Cadastro.sln
+  MIN_COVERAGE: "80"
+  SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+  SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
 jobs:
   deploy:
-    name: Deploy Cadastro
+    name: Deploy Cadastro to K3s
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      ECS_TASK_EXECUTION_ROLE_ARN: ${{ vars.ECS_TASK_EXECUTION_ROLE_ARN }}
-      ECS_TASK_ROLE_ARN: ${{ vars.ECS_TASK_ROLE_ARN }}
+      TF_STATE_BUCKET_FALLBACK: ${{ vars.TF_STATE_BUCKET }}
+      MANIFEST_TRANSPORT: ${{ inputs.transport }}
     steps:
       - name: Validate request
         run: |
           test "${GITHUB_REF}" = "refs/heads/main"
           test "${{ github.event.inputs.confirmation }}" = "DEPLOY"
+          test -n "${AWS_REGION}"
 
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -42,14 +60,93 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-official-config.ps1
 
-      - name: Validate deployment variables
+      - name: Setup Java for SonarCloud
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Validate quality analysis variables
         shell: pwsh
         run: |
-          foreach ($name in @('AWS_REGION', 'ECS_TASK_EXECUTION_ROLE_ARN', 'ECS_TASK_ROLE_ARN')) {
+          foreach ($name in @('SONAR_PROJECT_KEY', 'SONAR_ORGANIZATION')) {
             if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
-              throw "Repository Variable $name is required."
+              throw "Repository Variable $name is required for the quality gate."
             }
           }
+          if ([string]::IsNullOrWhiteSpace($env:SONAR_TOKEN)) {
+            throw 'Secret SONAR_TOKEN is required for the quality gate.'
+          }
+
+      - name: Install SonarScanner
+        run: dotnet tool install --global dotnet-sonarscanner
+
+      - name: SonarCloud begin
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet sonarscanner begin \
+            /k:"$SONAR_PROJECT_KEY" \
+            /o:"$SONAR_ORGANIZATION" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.cs.vstest.reportsPaths="TestResults/**/*.trx" \
+            /d:sonar.qualitygate.wait=true
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        run: dotnet build "$SOLUTION" --configuration Release --no-restore
+
+      - name: Test with coverage
+        run: |
+          dotnet test "$SOLUTION" --configuration Release --no-build \
+            --settings .runsettings \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults \
+            --logger "trx;LogFileName=test-results.trx"
+
+      - name: Build coverage report
+        run: |
+          set -euo pipefail
+          dotnet tool install --global dotnet-reportgenerator-globaltool >/dev/null
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          reportgenerator \
+            "-reports:TestResults/**/coverage.cobertura.xml" \
+            "-targetdir:coverage-report" \
+            "-reporttypes:Html;Cobertura;TextSummary"
+
+      - name: Enforce coverage gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # O gate local e independente do SonarCloud: cobertura abaixo do
+          # minimo reprova mesmo com o SonarCloud indisponivel.
+          $reportPath = 'coverage-report/Cobertura.xml'
+          if (-not (Test-Path -LiteralPath $reportPath)) { throw 'Relatorio de cobertura nao gerado.' }
+          [xml]$report = Get-Content -LiteralPath $reportPath -Raw
+          $linePercentage = [Math]::Round([double]$report.coverage.'line-rate' * 100, 2)
+          $minimum = [double]$env:MIN_COVERAGE
+          "Line coverage: $linePercentage%" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($linePercentage -lt $minimum) {
+            throw "Cobertura de linhas $linePercentage% abaixo do minimo exigido de $minimum%."
+          }
+
+      - name: Publish coverage artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ github.run_id }}
+          path: |
+            coverage-report
+            TestResults/**/*.trx
+          retention-days: 7
+
+      - name: SonarCloud end and quality gate
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
@@ -64,19 +161,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          aws sts get-caller-identity >/dev/null
-          cluster="$(aws ssm get-parameter --name /oficina/infra/cluster/name --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
+          identity_account="$(aws sts get-caller-identity --query Account --output text)"
+          deterministic_bucket="oficina-terraform-state-${identity_account}-${AWS_REGION}"
+          bucket="$deterministic_bucket"
+          if ! aws s3api head-bucket --bucket "$bucket" 2>/dev/null; then
+            bucket="${TF_STATE_BUCKET_FALLBACK:-}"
+          fi
+
           ecr="$(aws ssm get-parameter --name /oficina/infra/ecr/cadastro --region "$AWS_REGION" --query 'Parameter.Value' --output text)"
-          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/target-group-arn --region "$AWS_REGION" >/dev/null
-          aws ssm get-parameter --name /oficina/infra/ecs/cadastro/log-group-name --region "$AWS_REGION" >/dev/null
-          aws ssm get-parameter --name /oficina/infra/ecs/task-security-group-id --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/k8s/instance-id --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter --name /oficina/infra/services/cadastro/target-group-arn --region "$AWS_REGION" >/dev/null
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/runtime-db >/dev/null
           aws secretsmanager describe-secret --secret-id /oficina/cadastro/migration-db >/dev/null
-          aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/runtime-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
-          aws secretsmanager list-secret-version-ids --secret-id /oficina/cadastro/migration-db --include-deprecated --query "Versions[?contains(VersionStages, \`AWSCURRENT\`)] | length(@)" --output text | grep -q '^1$'
+
+          # Tag imutavel derivada do commit. latest esta proibido.
           image_tag="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           {
-            echo "cluster=${cluster}"
+            echo "bucket=${bucket}"
             echo "ecr=${ecr}"
             echo "image_tag=${image_tag}"
             echo "runtime_image=${ecr}:${image_tag}"
@@ -86,21 +187,12 @@ jobs:
       - name: Login to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Restore
-        run: dotnet restore Oficina.Cadastro.sln
-
-      - name: Build
-        run: dotnet build Oficina.Cadastro.sln --configuration Release --no-restore
-
-      - name: Test
-        run: dotnet test Oficina.Cadastro.sln --configuration Release --no-build
-
       - name: Build images
         run: |
           docker build -f Dockerfile -t "${{ steps.platform.outputs.runtime_image }}" .
           docker build -f Dockerfile.migration -t "${{ steps.platform.outputs.migration_image }}" .
 
-      - name: Scan images
+      - name: Scan runtime image
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ${{ steps.platform.outputs.runtime_image }}
@@ -119,25 +211,29 @@ jobs:
           docker push "${{ steps.platform.outputs.runtime_image }}"
           docker push "${{ steps.platform.outputs.migration_image }}"
 
-      - name: Deploy to ECS
+      - name: Deploy to K3s
         shell: pwsh
         run: |
-          ./scripts/deploy-ecs-fargate.ps1 `
+          ./scripts/deploy-k3s.ps1 `
             -RuntimeImage "${{ steps.platform.outputs.runtime_image }}" `
             -MigrationImage "${{ steps.platform.outputs.migration_image }}" `
             -AwsRegion "$env:AWS_REGION" `
-            -TaskExecutionRoleArn "$env:ECS_TASK_EXECUTION_ROLE_ARN" `
-            -TaskRoleArn "$env:ECS_TASK_ROLE_ARN"
+            -CommitSha "$env:GITHUB_SHA" `
+            -RunId "$env:GITHUB_RUN_ID" `
+            -StateBucket "${{ steps.platform.outputs.bucket }}" `
+            -Transport "$env:MANIFEST_TRANSPORT"
 
       - name: Publish summary
         run: |
           {
-            echo "Commit SHA: ${GITHUB_SHA}"
-            echo "ECR repository: ${{ steps.platform.outputs.ecr }}"
-            echo "Runtime image tag: ${{ steps.platform.outputs.image_tag }}"
-            echo "Migration image tag: ${{ steps.platform.outputs.image_tag }}-migration"
-            echo "Cluster: ${{ steps.platform.outputs.cluster }}"
-            echo "Service: oficina-cadastro"
-            echo "Deployment status: ECS stable"
-            echo "Target health: healthy"
+            echo "## Cadastro Deploy"
+            echo
+            echo "- Commit SHA: ${GITHUB_SHA}"
+            echo "- ECR repository: ${{ steps.platform.outputs.ecr }}"
+            echo "- Runtime image tag: ${{ steps.platform.outputs.image_tag }}"
+            echo "- Migration image tag: ${{ steps.platform.outputs.image_tag }}-migration"
+            echo "- Service: oficina-cadastro"
+            echo "- NodePort: 30080"
+            echo "- Manifest transport: ${MANIFEST_TRANSPORT}"
+            echo "- Target group: healthy"
           } >> "${GITHUB_STEP_SUMMARY}"
