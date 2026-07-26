@@ -202,7 +202,7 @@ public class OpenTelemetryRegistrationTests
     }
 
     [Fact]
-    public void Deve_registrar_tracing_quando_habilitada_sem_endpoint()
+    public void Deve_ignorar_o_registro_quando_endpoint_nao_esta_configurado()
     {
         var services = new ServiceCollection();
 
@@ -211,7 +211,7 @@ public class OpenTelemetryRegistrationTests
             new LoggingBuilderStub(services),
             "oficina-cadastro");
 
-        Assert.Contains(services, x => x.ServiceType.FullName?.Contains("OpenTelemetry") == true);
+        Assert.DoesNotContain(services, x => x.ServiceType.FullName?.Contains("OpenTelemetry") == true);
     }
 
     [Fact]
@@ -221,8 +221,7 @@ public class OpenTelemetryRegistrationTests
 
         services.AddOpenTelemetryFailOpen(
             Configuracao(
-                ("OpenTelemetry:Enabled", "true"),
-                ("OpenTelemetry:OtlpEndpoint", "http://collector.example.invalid:4317")),
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector.example.invalid:4317")),
             new LoggingBuilderStub(services),
             "oficina-cadastro");
 

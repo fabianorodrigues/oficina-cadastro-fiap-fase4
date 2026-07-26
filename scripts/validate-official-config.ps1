@@ -113,9 +113,8 @@ foreach ($pattern in $forbiddenPatterns) {
 #
 # Tres invariantes que so apareceriam em runtime se nao fossem verificadas aqui:
 #
-# 1. OpenTelemetry__OtlpEndpoint e o gate que registra o exporter e
-#    OTEL_EXPORTER_OTLP_ENDPOINT e o valor que o SDK realmente usa. Divergindo, a
-#    aplicacao registra o exporter apontando para outro destino.
+# 1. OTEL_EXPORTER_OTLP_ENDPOINT e opcional. Sem ele, nenhum OpenTelemetry/exporter
+#    e registrado. Se ele existir, precisa apontar para o gateway real do chart.
 # 2. service.version nao pode ter duas origens. Fica somente em
 #    OTEL_SERVICE_VERSION; repetido em OTEL_RESOURCE_ATTRIBUTES, as duas fontes
 #    divergem em silencio.
@@ -127,7 +126,12 @@ $forbiddenTelemetryKeys = @(
     'NEW_RELIC_LICENSE_KEY',
     'NEW_RELIC_USER_API_KEY',
     'NEW_RELIC_API_KEY',
-    'OTEL_EXPORTER_OTLP_HEADERS'
+    'OTEL_EXPORTER_OTLP_HEADERS',
+    'OpenTelemetry__Enabled',
+    'OpenTelemetry__OtlpEndpoint',
+    'OTEL_EXPORTER_OTLP_PROTOCOL',
+    'OTEL_SERVICE_NAME',
+    'OTEL_METRIC_EXPORT_INTERVAL'
 )
 
 $telemetryFound = $false
@@ -140,7 +144,7 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
 
         foreach ($key in $forbiddenTelemetryKeys) {
             if ($lines | Select-String -Pattern "^\s+$([regex]::Escape($key))\s*:" -Quiet) {
-                Add-Error "$name declara $key. Somente o Collector conhece credencial da New Relic."
+                Add-Error "$name declara $key. O ConfigMap deve manter observabilidade opcional e sem credenciais."
             }
         }
 
@@ -150,27 +154,13 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
             }
         }
 
-        $gate = Get-ConfigMapValue -Lines $lines -Key 'OpenTelemetry__OtlpEndpoint'
-        $sdk = Get-ConfigMapValue -Lines $lines -Key 'OTEL_EXPORTER_OTLP_ENDPOINT'
-        if ($null -eq $gate -and $null -eq $sdk) { continue }
+        $endpoint = Get-ConfigMapValue -Lines $lines -Key 'OTEL_EXPORTER_OTLP_ENDPOINT'
+        if ($null -eq $endpoint) { continue }
 
         $telemetryFound = $true
 
-        if ($null -eq $gate) {
-            Add-Error "$name define OTEL_EXPORTER_OTLP_ENDPOINT sem OpenTelemetry__OtlpEndpoint: sem o gate nenhum exporter e registrado."
-        }
-        elseif ($null -eq $sdk) {
-            Add-Error "$name define OpenTelemetry__OtlpEndpoint sem OTEL_EXPORTER_OTLP_ENDPOINT: o SDK cairia no destino default."
-        }
-        elseif ($gate -ne $sdk) {
-            Add-Error "$name tem endpoints de telemetria divergentes: gate '$gate' e SDK '$sdk'."
-        }
-        elseif ($gate -ne $expectedOtlpEndpoint) {
-            Add-Error "$name aponta OTLP para '$gate'; esperado '$expectedOtlpEndpoint'."
-        }
-
-        if ([string]::IsNullOrWhiteSpace((Get-ConfigMapValue -Lines $lines -Key 'OTEL_SERVICE_NAME'))) {
-            Add-Error "$name nao define OTEL_SERVICE_NAME."
+        if ($endpoint -ne $expectedOtlpEndpoint) {
+            Add-Error "$name aponta OTLP para '$endpoint'; esperado '$expectedOtlpEndpoint'."
         }
 
         if ([string]::IsNullOrWhiteSpace((Get-ConfigMapValue -Lines $lines -Key 'OTEL_SERVICE_VERSION'))) {
@@ -189,10 +179,6 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
                 }
             }
         }
-    }
-
-    if (-not $telemetryFound) {
-        Add-Error "Nenhum manifesto em $ManifestDirectory declara a configuracao de telemetria."
     }
 }
 
