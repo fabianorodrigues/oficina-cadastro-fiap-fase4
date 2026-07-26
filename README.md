@@ -36,8 +36,8 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 
 | Repositório | Responsabilidade | Etapas |
 |---|---|:---:|
-| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos, estado do Terraform e admin inicial | 1, 3 e 5.1 |
-| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB e entrada de API | 2 e 8 |
+| [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4) | Rede, banco de dados, segredos, estado do Terraform e admin inicial | 1, 3 e 6 |
+| [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4) | Plataforma Kubernetes/ALB, entrada de API e observabilidade | 2, 9 e 10 |
 | [oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4) | Autenticação por CPF e validação de token | 4 |
 | **oficina-cadastro** *(este)* | Clientes, veículos, funcionários e catálogo de serviços | 5 |
 | [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4) | Peças, insumos, saldos e reservas | 6 |
@@ -56,16 +56,17 @@ A **Oficina** é uma plataforma de gestão de oficina mecânica implantada na AW
 | 3 | oficina-infra-db | Database Bootstrap (estrutura) | `BOOTSTRAP` |
 | 4 | oficina-auth-lambda | Auth Deploy | `DEPLOY` |
 | **5** | **oficina-cadastro** | **Cadastro Deploy** | `DEPLOY` |
-| 5.1 | oficina-infra-db | Initial Admin Provision | `PROVISION_ADMIN` |
-| 6 | oficina-estoque | Estoque Deploy | `DEPLOY` |
-| 7 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
-| 8 | oficina-infra | Entrypoint Deploy | `APPLY` |
-| 9 | oficina-ordens-servico | Collection Postman (execução manual) | — |
+| 6 | oficina-infra-db | Initial Admin Provision | `PROVISION_ADMIN` |
+| 7 | oficina-estoque | Estoque Deploy | `DEPLOY` |
+| 8 | oficina-ordens-servico | Ordens Deploy | `DEPLOY` |
+| 9 | oficina-infra | Entrypoint Deploy | `APPLY` |
+| 10 | oficina-infra | Observability Deploy | `DEPLOY` |
+| 11 | oficina-ordens-servico | Collection Postman (execução manual) | — |
 
-Após a etapa 8, o **Observability Validate** (oficina-infra) está disponível como validação **opcional**.
+Após a etapa 9, execute o **Observability Deploy** (oficina-infra) com `mode=DEPLOY` antes da validação funcional final.
 
 > [!IMPORTANT]
-> Este é o primeiro dos três serviços. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Ele vem antes da etapa **5.1** porque suas migrations criam `dbo.Funcionarios`, tabela usada pelo bootstrap do administrador inicial e pela autenticação. As etapas 6 e 7 não dependem desse admin para publicar os workloads, mas a etapa 9 depende dele para fazer login.
+> Este é o primeiro dos três serviços. Depende do cluster e do registro de imagem da etapa 2 e do banco criado na etapa 3. Ele vem antes da etapa **6** porque suas migrations criam `dbo.Funcionarios`, tabela usada pelo bootstrap do administrador inicial e pela autenticação. As etapas 7 e 8 não dependem desse admin para publicar os workloads, mas a etapa 11 depende dele para fazer login.
 
 ---
 
@@ -178,13 +179,12 @@ Definidas pelo deploy no ConfigMap e nos Secrets do namespace; nenhuma precisa s
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
 | `ConnectionStrings__OficinaCadastroDb` | Materializada como Secret Kubernetes dentro da EC2, a partir do Secrets Manager |
 | `Database__ApplyMigrations` | Desativado — migrações rodam em Migration Job próprio |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Opcional. Quando ausente, a API sobe sem registrar OpenTelemetry/exporter |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint interno obrigatório do Collector; o exporter é fail-open se o gateway ainda não responder |
 | `OTEL_SERVICE_VERSION` | commit SHA curto, resolvido no deploy |
 | `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment`, `service.namespace` e `k8s.cluster.name`. **Não** contém `service.version` |
 
 O nome do serviço vem do código (`oficina-cadastro`), evitando `OTEL_SERVICE_NAME`
-duplicado no ConfigMap. `OpenTelemetry__Enabled=false` continua aceito apenas como
-override local explícito.
+duplicado no ConfigMap.
 
 Nenhuma credencial da New Relic é entregue ao Pod: `NEW_RELIC_LICENSE_KEY`,
 `NEW_RELIC_USER_API_KEY` e `OTEL_EXPORTER_OTLP_HEADERS` são proibidos e
@@ -249,7 +249,7 @@ aws elbv2 describe-target-health --target-group-arn "$TG" --region "$REGIAO" \
 
 </details>
 
-Após a **etapa 8**, a verificação de saúde também responde pela API pública, em `/health/cadastro`.
+Após a **etapa 9**, a verificação de saúde também responde pela API pública, em `/health/cadastro`.
 
 ---
 
@@ -320,13 +320,13 @@ Detalhes, queries do dashboard, alertas e troubleshooting em `docs/OBSERVABILITY
 
 ## Próxima etapa
 
-**Etapa 5.1 — obrigatória no primeiro provisionamento e antes da validação funcional.** Pré-condição: Deployment `oficina-cadastro` disponível no cluster, Migration Job concluído com sucesso e destino saudável no *target group*.
+**Etapa 6 — obrigatória no primeiro provisionamento e antes da validação funcional.** Pré-condição: Deployment `oficina-cadastro` disponível no cluster, Migration Job concluído com sucesso e destino saudável no *target group*.
 
-**→ [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4)** — seção [Como executar → Etapa 5.1](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4#etapa-51-admin-inicial). Execute o **Initial Admin Provision** com `confirmation` = `PROVISION_ADMIN`.
+**→ [oficina-infra-db](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4)** — seção [Como executar → Etapa 6](https://github.com/fabianorodrigues/oficina-infra-db-fiap-fase4#etapa-6-admin-inicial). Execute o **Initial Admin Provision** com `confirmation` = `PROVISION_ADMIN`.
 
-Depois siga para a **etapa 6** em [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4), a **etapa 7** em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4) e a **etapa 8** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway.
+Depois siga para a **etapa 7** em [oficina-estoque](https://github.com/fabianorodrigues/oficina-estoque-fiap-fase4), a **etapa 8** em [oficina-ordens-servico](https://github.com/fabianorodrigues/oficina-ordens-servico-fiap-fase4), a **etapa 9** em [oficina-infra](https://github.com/fabianorodrigues/oficina-infra-fiap-fase4), que publica as rotas na API Gateway, e a **etapa 10** de observabilidade.
 
 > [!NOTE]
-> A etapa 5.1 é o ponto que transforma os secrets `ADMIN_INICIAL_CPF` e `ADMIN_INICIAL_PASSWORD` em um funcionário administrador real no banco. Em redeploys normais do Cadastro ela é opcional se o admin já existe; sem ela no primeiro deploy, a collection Postman da etapa 9 não consegue autenticar.
+> A etapa 6 é o ponto que transforma os secrets `ADMIN_INICIAL_CPF` e `ADMIN_INICIAL_PASSWORD` em um funcionário administrador real no banco. Em redeploys normais do Cadastro ela é opcional se o admin já existe; sem ela no primeiro deploy, a collection Postman da etapa 11 não consegue autenticar.
 
 Para revisar a etapa anterior, volte a **[oficina-auth-lambda](https://github.com/fabianorodrigues/oficina-auth-lambda-fiap-fase4)** (etapa 4).
