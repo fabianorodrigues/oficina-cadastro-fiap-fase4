@@ -178,14 +178,13 @@ Definidas pelo deploy no ConfigMap e nos Secrets do namespace; nenhuma precisa s
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
 | `ConnectionStrings__OficinaCadastroDb` | Materializada como Secret Kubernetes dentro da EC2, a partir do Secrets Manager |
 | `Database__ApplyMigrations` | Desativado — migrações rodam em Migration Job próprio |
-| `OpenTelemetry__Enabled` | `true` |
-| `OpenTelemetry__OtlpEndpoint` | `http://nr-k8s-otel-collector-gateway.newrelic.svc.cluster.local:4317` — o *gate* que decide se o exporter é registrado |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | mesmo valor acima — é o que o SDK realmente usa; divergir dos dois reprova o deploy |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` |
-| `OTEL_SERVICE_NAME` | `oficina-cadastro` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Opcional. Quando ausente, a API sobe sem registrar OpenTelemetry/exporter |
 | `OTEL_SERVICE_VERSION` | commit SHA curto, resolvido no deploy |
 | `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment`, `service.namespace` e `k8s.cluster.name`. **Não** contém `service.version` |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` |
+
+O nome do serviço vem do código (`oficina-cadastro`), evitando `OTEL_SERVICE_NAME`
+duplicado no ConfigMap. `OpenTelemetry__Enabled=false` continua aceito apenas como
+override local explícito.
 
 Nenhuma credencial da New Relic é entregue ao Pod: `NEW_RELIC_LICENSE_KEY`,
 `NEW_RELIC_USER_API_KEY` e `OTEL_EXPORTER_OTLP_HEADERS` são proibidos e
