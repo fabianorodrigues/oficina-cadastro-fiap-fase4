@@ -29,6 +29,17 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
     throw "Arquivo de configuracao oficial nao encontrado: $ConfigPath"
 }
 
+$dockerfilePath = "Dockerfile"
+if (-not (Test-Path -LiteralPath $dockerfilePath -PathType Leaf)) {
+    Add-Error "Dockerfile ausente."
+}
+else {
+    $dockerfileRaw = Get-Content -LiteralPath $dockerfilePath -Raw
+    if ($dockerfileRaw -notmatch '(?m)^COPY\s+Directory\.Packages\.props\s+\./\s*$') {
+        Add-Error "Dockerfile deve copiar Directory.Packages.props antes do dotnet restore."
+    }
+}
+
 $raw = Get-Content -LiteralPath $ConfigPath -Raw
 $config = $raw | ConvertFrom-Json
 
@@ -120,6 +131,7 @@ $forbiddenTelemetryKeys = @(
 )
 
 $telemetryFound = $false
+$expectedOtlpEndpoint = 'http://nr-k8s-otel-collector-gateway.newrelic.svc.cluster.local:4317'
 
 if (Test-Path -LiteralPath $ManifestDirectory) {
     foreach ($manifest in Get-ChildItem -LiteralPath $ManifestDirectory -Filter '*.yaml' -File) {
@@ -152,6 +164,9 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
         }
         elseif ($gate -ne $sdk) {
             Add-Error "$name tem endpoints de telemetria divergentes: gate '$gate' e SDK '$sdk'."
+        }
+        elseif ($gate -ne $expectedOtlpEndpoint) {
+            Add-Error "$name aponta OTLP para '$gate'; esperado '$expectedOtlpEndpoint'."
         }
 
         if ([string]::IsNullOrWhiteSpace((Get-ConfigMapValue -Lines $lines -Key 'OTEL_SERVICE_NAME'))) {

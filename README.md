@@ -179,7 +179,7 @@ Definidas pelo deploy no ConfigMap e nos Secrets do namespace; nenhuma precisa s
 | `ConnectionStrings__OficinaCadastroDb` | Materializada como Secret Kubernetes dentro da EC2, a partir do Secrets Manager |
 | `Database__ApplyMigrations` | Desativado — migrações rodam em Migration Job próprio |
 | `OpenTelemetry__Enabled` | `true` |
-| `OpenTelemetry__OtlpEndpoint` | `http://nr-otel-gateway.newrelic.svc.cluster.local:4317` — o *gate* que decide se o exporter é registrado |
+| `OpenTelemetry__OtlpEndpoint` | `http://nr-k8s-otel-collector-gateway.newrelic.svc.cluster.local:4317` — o *gate* que decide se o exporter é registrado |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | mesmo valor acima — é o que o SDK realmente usa; divergir dos dois reprova o deploy |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` |
 | `OTEL_SERVICE_NAME` | `oficina-cadastro` |
