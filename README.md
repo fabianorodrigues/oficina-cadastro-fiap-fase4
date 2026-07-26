@@ -24,6 +24,7 @@ Microsserviço de **clientes, veículos, funcionários e catálogo de serviços*
 - [Como executar](#como-executar)
 - [Validação](#validação)
 - [Execução local](#execução-local)
+- [Observabilidade](#observabilidade)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Próxima etapa](#próxima-etapa)
 
@@ -177,6 +178,19 @@ Definidas pelo deploy no ConfigMap e nos Secrets do namespace; nenhuma precisa s
 | `ASPNETCORE_ENVIRONMENT` | `Production` |
 | `ConnectionStrings__OficinaCadastroDb` | Materializada como Secret Kubernetes dentro da EC2, a partir do Secrets Manager |
 | `Database__ApplyMigrations` | Desativado — migrações rodam em Migration Job próprio |
+| `OpenTelemetry__Enabled` | `true` |
+| `OpenTelemetry__OtlpEndpoint` | `http://nr-otel-gateway.newrelic.svc.cluster.local:4317` — o *gate* que decide se o exporter é registrado |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | mesmo valor acima — é o que o SDK realmente usa; divergir dos dois reprova o deploy |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` |
+| `OTEL_SERVICE_NAME` | `oficina-cadastro` |
+| `OTEL_SERVICE_VERSION` | commit SHA curto, resolvido no deploy |
+| `OTEL_RESOURCE_ATTRIBUTES` | `deployment.environment`, `service.namespace` e `k8s.cluster.name`. **Não** contém `service.version` |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` |
+
+Nenhuma credencial da New Relic é entregue ao Pod: `NEW_RELIC_LICENSE_KEY`,
+`NEW_RELIC_USER_API_KEY` e `OTEL_EXPORTER_OTLP_HEADERS` são proibidos e
+`scripts/validate-official-config.ps1` reprova o deploy se aparecerem. Só o
+Collector conhece a license key.
 
 A aplicação **recusa-se a iniciar** fora de desenvolvimento se a cadeia de conexão estiver vazia.
 
@@ -259,6 +273,41 @@ dotnet test
 - Configuração de cobertura: [`.runsettings`](.runsettings) e [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 Os testes cobrem regras de domínio e de aplicação, persistência (com banco em contêiner) e contratos públicos.
+
+---
+
+## Observabilidade
+
+Telemetria por OpenTelemetry, com um único Collector no cluster. O serviço envia
+traces e métricas por OTLP gRPC ao gateway interno e escreve logs JSON no stdout,
+que o receiver `filelog` coleta — a aplicação **não** exporta log por OTLP, para não
+entregar o mesmo registro por dois caminhos.
+
+**Contrato dos logs**, com os campos no nível superior do JSON:
+
+```
+timestamp, level, message, service.name, service.version, deployment.environment,
+correlationId, trace.id, span.id, ordemServicoId, messageId, messageType, sagaState
+```
+
+`AddJsonConsole` com `IncludeScopes` não serve: emitiria `trace.id` e `span.id`
+aninhados num array `Scopes`, e o New Relic exige esses campos no topo para
+correlacionar log com trace. Daí o `OficinaJsonConsoleFormatter` próprio.
+
+Proteção de dados por dois mecanismos: uma allowlist de chaves controla os atributos
+estruturados, e `message` e `exception.message` passam por sanitização complementar —
+a allowlist não cobre o texto da mensagem, onde um template já existente poderia
+colocar uma connection string. `Exception.Data` nunca é serializada.
+
+**Fail-open.** Falha do Collector ou do New Relic registra erro local e o serviço
+continua atendendo. Nada em telemetria pode impedir inicialização, requisição ou
+health check: o registro é envolvido em `try/catch` e o exporter tem timeout curto.
+
+Instrumentação ativa: ASP.NET Core, HttpClient, SqlClient e runtime .NET. `/ready`
+é excluído dos traces, porque o kubelet o consulta a cada 10 segundos; `/health`
+permanece rastreado, porque a validação remota depende dele.
+
+Detalhes, queries do dashboard, alertas e troubleshooting em `docs/OBSERVABILITY.md`.
 
 ---
 
