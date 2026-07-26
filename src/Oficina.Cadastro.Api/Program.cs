@@ -57,6 +57,7 @@ builder.Services.AddOpenTelemetryFailOpen(
 var app = builder.Build();
 
 await ApplyMigrationsIfEnabled(app);
+await app.SeedLocalAdminIfEnabled();
 
 if (app.Environment.IsDevelopment())
 {
@@ -82,6 +83,7 @@ app.MapGet("/ready", async (CadastroDbContext db, CancellationToken ct) =>
     })
     .AllowAnonymous();
 
+app.MapLocalAuthenticationEndpoints();
 app.MapControllers();
 
 app.Run();
