@@ -113,8 +113,8 @@ foreach ($pattern in $forbiddenPatterns) {
 #
 # Tres invariantes que so apareceriam em runtime se nao fossem verificadas aqui:
 #
-# 1. OTEL_EXPORTER_OTLP_ENDPOINT e opcional. Sem ele, nenhum OpenTelemetry/exporter
-#    e registrado. Se ele existir, precisa apontar para o gateway real do chart.
+# 1. OTEL_EXPORTER_OTLP_ENDPOINT aponta para o gateway real do chart. O exporter
+#    deve ser fail-open quando o Collector ainda nao estiver disponivel.
 # 2. service.version nao pode ter duas origens. Fica somente em
 #    OTEL_SERVICE_VERSION; repetido em OTEL_RESOURCE_ATTRIBUTES, as duas fontes
 #    divergem em silencio.
@@ -127,8 +127,6 @@ $forbiddenTelemetryKeys = @(
     'NEW_RELIC_USER_API_KEY',
     'NEW_RELIC_API_KEY',
     'OTEL_EXPORTER_OTLP_HEADERS',
-    'OpenTelemetry__Enabled',
-    'OpenTelemetry__OtlpEndpoint',
     'OTEL_EXPORTER_OTLP_PROTOCOL',
     'OTEL_SERVICE_NAME',
     'OTEL_METRIC_EXPORT_INTERVAL'
@@ -144,10 +142,9 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
 
         foreach ($key in $forbiddenTelemetryKeys) {
             if ($lines | Select-String -Pattern "^\s+$([regex]::Escape($key))\s*:" -Quiet) {
-                Add-Error "$name declara $key. O ConfigMap deve manter observabilidade opcional e sem credenciais."
+                Add-Error "$name declara $key. O ConfigMap deve manter OTLP fail-open e sem credenciais."
             }
         }
-
         foreach ($pattern in @('NRAK-[A-Za-z0-9]{10,}', 'NRAA-[A-Za-z0-9]{10,}')) {
             if ($lines | Select-String -Pattern $pattern -Quiet) {
                 Add-Error "$name contem valor com formato de chave da New Relic ($pattern)."
@@ -180,6 +177,10 @@ if (Test-Path -LiteralPath $ManifestDirectory) {
             }
         }
     }
+}
+
+if (-not $telemetryFound) {
+    Add-Error "ConfigMap da API deve declarar OTEL_EXPORTER_OTLP_ENDPOINT."
 }
 
 if ($errors.Count -gt 0) {

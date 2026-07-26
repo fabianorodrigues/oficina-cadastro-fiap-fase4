@@ -189,25 +189,12 @@ public class DevelopmentAuthenticationHandlerTests
 public class OpenTelemetryRegistrationTests
 {
     [Fact]
-    public void Deve_ignorar_o_registro_quando_a_telemetria_esta_desabilitada()
-    {
-        var services = new ServiceCollection();
-
-        services.AddOpenTelemetryFailOpen(
-            Configuracao(("OpenTelemetry:Enabled", "false")),
-            new LoggingBuilderStub(services),
-            "oficina-cadastro");
-
-        Assert.DoesNotContain(services, x => x.ServiceType.FullName?.Contains("OpenTelemetry") == true);
-    }
-
-    [Fact]
     public void Deve_ignorar_o_registro_quando_endpoint_nao_esta_configurado()
     {
         var services = new ServiceCollection();
 
         services.AddOpenTelemetryFailOpen(
-            Configuracao(("OpenTelemetry:Enabled", "true")),
+            Configuracao(),
             new LoggingBuilderStub(services),
             "oficina-cadastro");
 
