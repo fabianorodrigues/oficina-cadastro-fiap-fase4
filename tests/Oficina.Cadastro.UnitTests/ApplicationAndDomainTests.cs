@@ -63,6 +63,48 @@ public class ApplicationAndDomainTests
     }
 
     [Fact]
+    public void Servico_deve_substituir_receitas_sem_manter_itens_antigos()
+    {
+        var primeiraPeca = Guid.NewGuid();
+        var segundaPeca = Guid.NewGuid();
+        var insumo = Guid.NewGuid();
+        var servico = new Servico(120m);
+        servico.AdicionarPeca(Guid.NewGuid(), 1);
+        servico.AdicionarInsumo(Guid.NewGuid(), 1);
+
+        servico.SubstituirPecas([(primeiraPeca, 2), (segundaPeca, 3)]);
+        servico.SubstituirInsumos([(insumo, 4)]);
+
+        Assert.Equal([primeiraPeca, segundaPeca], servico.Pecas.Select(x => x.PecaId));
+        Assert.Equal(3, servico.Pecas.Single(x => x.PecaId == segundaPeca).Quantidade);
+        Assert.Equal(insumo, Assert.Single(servico.Insumos).InsumoId);
+        Assert.Equal(4, Assert.Single(servico.Insumos).Quantidade);
+    }
+
+    [Fact]
+    public void Servico_deve_rejeitar_receitas_invalidas()
+    {
+        var servico = new Servico(120m);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => servico.DefinirMaoDeObra(-1));
+        Assert.Throws<ArgumentException>(() => servico.AdicionarPeca(Guid.Empty, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => servico.AdicionarPeca(Guid.NewGuid(), 0));
+        Assert.Throws<ArgumentException>(() => servico.AdicionarInsumo(Guid.Empty, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => servico.AdicionarInsumo(Guid.NewGuid(), 0));
+    }
+
+    [Theory]
+    [InlineData("", "Fiat", 2020, "descricao")]
+    [InlineData("Uno", "", 2020, "marca")]
+    [InlineData("Uno", "Fiat", 1899, "ano")]
+    public void Modelo_deve_rejeitar_dados_invalidos(string descricao, string marca, int ano, string parametro)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => new Modelo(descricao, marca, ano));
+
+        Assert.Equal(parametro, ex.ParamName);
+    }
+
+    [Fact]
     public async Task CadastrarCliente_deve_adicionar_e_salvar()
     {
         var repo = new FakeCadastroRepository();
@@ -114,6 +156,21 @@ public class ApplicationAndDomainTests
     }
 
     [Fact]
+    public async Task ListarVeiculosPorCliente_deve_filtrar_apenas_o_cliente_informado()
+    {
+        var repo = new FakeCadastroRepository();
+        var clienteId = Guid.NewGuid();
+        var outroClienteId = Guid.NewGuid();
+        var veiculoDoCliente = new Veiculo(clienteId, new Placa("ABC1D23"), new Renavam("12345678901"), new Modelo("Uno", "Fiat", 2020));
+        repo.Veiculos.Add(veiculoDoCliente);
+        repo.Veiculos.Add(new Veiculo(outroClienteId, new Placa("DEF4G56"), new Renavam("99999999999"), new Modelo("Onix", "Chevrolet", 2022)));
+
+        var resultado = await new ListarVeiculosPorClienteUseCase(repo).Executar(clienteId, CancellationToken.None);
+
+        Assert.Equal(veiculoDoCliente.Id, Assert.Single(resultado).Id);
+    }
+
+    [Fact]
     public async Task Consulta_batch_de_servicos_deve_retornar_encontrados_e_ausentes()
     {
         var repo = new FakeServicoRepository();
@@ -156,6 +213,22 @@ public class ApplicationAndDomainTests
             .Validate(new CadastrarVeiculoRequest(Guid.Empty, "", "1", new ModeloRequest("", "", 1800))).IsValid);
         Assert.False(new CadastrarServicoRequestValidator()
             .Validate(new CadastrarServicoRequest(-1, [new ItemRequeridoRequest(Guid.Empty, 0)], null)).IsValid);
+    }
+
+    [Fact]
+    public void Validators_de_atualizacao_devem_validar_payloads()
+    {
+        var clienteValidator = new AtualizarClienteRequestValidator();
+        var veiculoValidator = new AtualizarVeiculoRequestValidator();
+
+        Assert.True(clienteValidator.Validate(
+            new AtualizarClienteRequest("12345678909", "Maria", "maria@example.invalid", "11999990000")).IsValid);
+        Assert.False(clienteValidator.Validate(
+            new AtualizarClienteRequest("", "", "sem-arroba", "1")).IsValid);
+        Assert.True(veiculoValidator.Validate(
+            new AtualizarVeiculoRequest("ABC1D23", "12345678901", new ModeloRequest("Civic", "Honda", 2022))).IsValid);
+        Assert.False(veiculoValidator.Validate(
+            new AtualizarVeiculoRequest("", "1", new ModeloRequest("", "", 1800))).IsValid);
     }
 
     [Fact]

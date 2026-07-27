@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using Oficina.Cadastro.Api.Middleware;
 using Oficina.Cadastro.Api.Observability;
@@ -202,6 +204,39 @@ public class OficinaTelemetryResourceTests
         Assert.Equal("oficina-cadastro", resource.ServiceName);
         Assert.Null(resource.ServiceVersion);
         Assert.Null(resource.DeploymentEnvironment);
+    }
+
+    private static IConfiguration Configuracao(params (string Chave, string Valor)[] valores)
+        => new ConfigurationBuilder()
+            .AddInMemoryCollection(valores.Select(x => new KeyValuePair<string, string?>(x.Chave, x.Valor)))
+            .Build();
+}
+
+public class LoggingRegistrationTests
+{
+    [Fact]
+    public void Deve_registrar_formatter_json_com_scopes_e_recurso_padronizado()
+    {
+        var services = new ServiceCollection();
+        var configuration = Configuracao(
+            ("OTEL_SERVICE_NAME", "oficina-cadastro"),
+            ("OTEL_SERVICE_VERSION", "sha-abcdef0"),
+            ("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=production,service.namespace=oficina"));
+
+        services.AddLogging(logging =>
+            logging.AddOficinaJsonConsole(configuration, "fallback-cadastro"));
+
+        Assert.Contains(services, service =>
+            service.ServiceType == typeof(ConsoleFormatter) &&
+            service.ImplementationType == typeof(OficinaJsonConsoleFormatter));
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<OficinaJsonConsoleFormatterOptions>>().Value;
+
+        Assert.True(options.IncludeScopes);
+        Assert.Equal("oficina-cadastro", options.ServiceName);
+        Assert.Equal("sha-abcdef0", options.ServiceVersion);
+        Assert.Equal("production", options.DeploymentEnvironment);
     }
 
     private static IConfiguration Configuracao(params (string Chave, string Valor)[] valores)
